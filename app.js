@@ -2,6 +2,7 @@ const state = {
   requirements: [],
   priorities: [],
   grantAnalysis: null,
+  currentProjectId: "",
   activeSection: "problem",
   sections: {
     problem: "",
@@ -476,11 +477,149 @@ const fields = {
   sectionDraft: document.querySelector("#sectionDraft"),
   problemRubric: document.querySelector("#problemRubric"),
   reviewFindings: document.querySelector("#reviewFindings"),
+  projectSelect: document.querySelector("#projectSelect"),
+  saveProjectButton: document.querySelector("#saveProjectButton"),
+  newProjectButton: document.querySelector("#newProjectButton"),
+  projectStatus: document.querySelector("#projectStatus"),
 };
+
+const projectStorageKey = "grantcraft.projects.v1";
 
 function switchPanel(panelId) {
   document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("is-visible", panel.id === panelId));
   document.querySelectorAll(".step").forEach((step) => step.classList.toggle("is-active", step.dataset.panel === panelId));
+}
+
+function createBlankSections() {
+  return sectionBlueprints.reduce((sections, section) => {
+    sections[section.id] = "";
+    return sections;
+  }, {});
+}
+
+function setProjectStatus(message) {
+  fields.projectStatus.textContent = message;
+}
+
+function getStoredProjects() {
+  try {
+    return JSON.parse(localStorage.getItem(projectStorageKey) || "[]");
+  } catch {
+    return [];
+  }
+}
+
+function setStoredProjects(projects) {
+  try {
+    localStorage.setItem(projectStorageKey, JSON.stringify(projects));
+  } catch {
+    fields.reviewFindings.innerHTML = `<div class="finding"><strong>Storage unavailable</strong><p>Browser storage is not available, so this project could not be saved locally.</p></div>`;
+  }
+}
+
+function currentProjectName() {
+  return fields.projectTitle.value.trim() || fields.funderName.value.trim() || "Untitled grant project";
+}
+
+function serializeCurrentProject() {
+  saveActiveDraft();
+  const now = new Date().toISOString();
+  return {
+    id: state.currentProjectId || `project-${Date.now()}`,
+    name: currentProjectName(),
+    updatedAt: now,
+    createdAt: now,
+    activeSection: state.activeSection,
+    fields: {
+      projectTitle: fields.projectTitle.value,
+      funderName: fields.funderName.value,
+      ideaText: fields.ideaText.value,
+      grantUrl: fields.grantUrl.value,
+      grantText: fields.grantText.value,
+    },
+    requirements: state.requirements,
+    priorities: state.priorities,
+    grantAnalysis: state.grantAnalysis,
+    sections: state.sections,
+  };
+}
+
+function renderProjectSelect() {
+  const projects = getStoredProjects().sort((a, b) => new Date(b.updatedAt) - new Date(a.updatedAt));
+  fields.projectSelect.innerHTML = `<option value="">Current unsaved project</option>${projects
+    .map((project) => {
+      const updated = project.updatedAt ? new Date(project.updatedAt).toLocaleDateString() : "saved";
+      return `<option value="${escapeHtml(project.id)}">${escapeHtml(project.name)} (${escapeHtml(updated)})</option>`;
+    })
+    .join("")}`;
+  fields.projectSelect.value = state.currentProjectId;
+}
+
+function saveCurrentProject() {
+  const project = serializeCurrentProject();
+  const projects = getStoredProjects();
+  const existingIndex = projects.findIndex((item) => item.id === project.id);
+  if (existingIndex >= 0) {
+    project.createdAt = projects[existingIndex].createdAt || project.createdAt;
+    projects[existingIndex] = project;
+  } else {
+    projects.push(project);
+  }
+  state.currentProjectId = project.id;
+  setStoredProjects(projects);
+  renderProjectSelect();
+  setProjectStatus(`Saved: ${project.name}`);
+  renderReadiness();
+}
+
+function loadProject(projectId) {
+  const project = getStoredProjects().find((item) => item.id === projectId);
+  if (!project) return;
+  state.currentProjectId = project.id;
+  state.activeSection = project.activeSection || "problem";
+  state.requirements = project.requirements || [];
+  state.priorities = project.priorities || [];
+  state.grantAnalysis = project.grantAnalysis || null;
+  state.sections = { ...createBlankSections(), ...(project.sections || {}) };
+
+  fields.projectTitle.value = project.fields?.projectTitle || "";
+  fields.funderName.value = project.fields?.funderName || "";
+  fields.ideaText.value = project.fields?.ideaText || "";
+  fields.grantUrl.value = project.fields?.grantUrl || "";
+  fields.grantText.value = project.fields?.grantText || "";
+
+  renderProjectSelect();
+  renderRequirements();
+  renderGrantAnalysis();
+  renderSections();
+  renderActiveSection();
+  renderReadiness();
+  setProjectStatus(`Loaded: ${project.name}`);
+}
+
+function startNewProject() {
+  state.currentProjectId = "";
+  state.requirements = [];
+  state.priorities = [];
+  state.grantAnalysis = null;
+  state.activeSection = "problem";
+  state.sections = createBlankSections();
+
+  fields.projectTitle.value = "";
+  fields.funderName.value = "";
+  fields.ideaText.value = "";
+  fields.grantUrl.value = "";
+  fields.grantText.value = "";
+  fields.sectionDraft.value = "";
+
+  renderProjectSelect();
+  renderRequirements();
+  renderGrantAnalysis();
+  renderSections();
+  renderActiveSection();
+  renderReadiness();
+  switchPanel("idea");
+  setProjectStatus("New unsaved project");
 }
 
 function normalizeLines(text) {
@@ -1390,6 +1529,17 @@ document.querySelector("#analyzeGrantButton").addEventListener("click", detectRe
 document.querySelector("#insertPromptButton").addEventListener("click", insertGuidePrompts);
 document.querySelector("#runReviewButton").addEventListener("click", runReview);
 document.querySelector("#exportButton").addEventListener("click", exportBrief);
+fields.saveProjectButton.addEventListener("click", saveCurrentProject);
+fields.newProjectButton.addEventListener("click", startNewProject);
+fields.projectSelect.addEventListener("change", (event) => {
+  if (event.target.value) {
+    loadProject(event.target.value);
+  } else {
+    state.currentProjectId = "";
+    renderProjectSelect();
+    setProjectStatus("Current project is unsaved");
+  }
+});
 
 document.querySelector("#addRequirementButton").addEventListener("click", () => {
   document.querySelector("#requirementDialog").showModal();
@@ -1431,4 +1581,5 @@ fields.documentInput.addEventListener("change", async (event) => {
 renderSections();
 renderActiveSection();
 renderRequirements();
+renderProjectSelect();
 renderReadiness();

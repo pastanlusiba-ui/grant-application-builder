@@ -58,7 +58,18 @@
             <p class="eyebrow">Personal grant application platform</p>
             <h2 id="workspaceTitle">Build an award-ready proposal</h2>
           </div>
-          <button id="exportButton" class="secondary-button" type="button">Export brief</button>
+          <div class="project-actions">
+            <label class="project-picker">
+              Saved projects
+              <select id="projectSelect">
+                <option value="">Current unsaved project</option>
+              </select>
+            </label>
+            <button id="saveProjectButton" class="secondary-button" type="button">Save project</button>
+            <button id="newProjectButton" class="secondary-button" type="button">New project</button>
+            <button id="exportButton" class="secondary-button" type="button">Export brief</button>
+            <span id="projectStatus" class="project-status">Not saved yet</span>
+          </div>
         </header>
 
         <section class="panel is-visible" id="idea">
