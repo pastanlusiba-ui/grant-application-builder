@@ -518,6 +518,86 @@ function countKeywordHits(text, keywords) {
   return keywords.reduce((count, keyword) => count + (text.includes(keyword) ? 1 : 0), 0);
 }
 
+function splitSentences(text) {
+  return text
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+|(?:\n+)/)
+    .map((sentence) => sentence.trim())
+    .filter((sentence) => sentence.length > 20);
+}
+
+function findGrantSentences(text, keywords, limit = 7) {
+  const lowered = keywords.map((keyword) => keyword.toLowerCase());
+  return uniqueItems(
+    splitSentences(text).filter((sentence) => {
+      const lowerSentence = sentence.toLowerCase();
+      return lowered.some((keyword) => lowerSentence.includes(keyword));
+    }),
+    limit,
+  );
+}
+
+function extractMatches(text, regex, limit = 8) {
+  return uniqueItems(Array.from(text.matchAll(regex)).map((match) => match[0]), limit);
+}
+
+function extractFunderLanguage(text, limit = 12) {
+  const stopWords = new Set([
+    "about",
+    "above",
+    "after",
+    "applicant",
+    "application",
+    "apply",
+    "award",
+    "before",
+    "budget",
+    "deadline",
+    "eligible",
+    "grant",
+    "include",
+    "must",
+    "proposal",
+    "required",
+    "section",
+    "submit",
+    "through",
+    "with",
+    "from",
+    "this",
+    "that",
+    "will",
+  ]);
+  const counts = {};
+  text
+    .toLowerCase()
+    .match(/\b[a-z][a-z-]{5,}\b/g)
+    ?.forEach((word) => {
+      if (!stopWords.has(word)) counts[word] = (counts[word] || 0) + 1;
+    });
+
+  return Object.entries(counts)
+    .sort(([, a], [, b]) => b - a)
+    .slice(0, limit)
+    .map(([word]) => word);
+}
+
+function buildFitVerdict(themes, ideaText) {
+  if (wordCount(ideaText) < 20) {
+    return "Idea fit cannot be judged yet. Add your project idea in Step 1 so the platform can compare it with the funder's priorities.";
+  }
+
+  if (themes.length >= 4) {
+    return "Strong potential fit if your idea directly addresses the detected priority themes and proves feasibility, evidence, and measurable outcomes.";
+  }
+
+  if (themes.length >= 2) {
+    return "Moderate potential fit. Strengthen the proposal by explicitly mirroring the funder's priority language and showing why your idea belongs in this call.";
+  }
+
+  return "Fit is still unclear. The proposal should make the connection to the funder's mission explicit in the title, problem statement, objectives, and impact section.";
+}
+
 function inferOpportunityType(text) {
   const types = [
     { label: "Research grant", keywords: ["research", "study", "hypothesis", "methodology", "investigator", "data", "publication"] },
@@ -542,12 +622,28 @@ function buildGrantAnalysis() {
   const grantText = fields.grantText.value.trim();
   const ideaText = fields.ideaText.value.trim();
   const funderName = fields.funderName.value.trim();
+  const grantUrl = fields.grantUrl.value.trim();
   const lines = normalizeLines(grantText);
   const lowerGrant = grantText.toLowerCase();
   const combined = `${grantText}\n${ideaText}`.toLowerCase();
+  const grantWordCount = wordCount(grantText);
 
-  if (wordCount(grantText) < 25 && !fields.grantUrl.value.trim()) {
-    return null;
+  if (grantWordCount < 25) {
+    return {
+      status: "needsText",
+      funderName: funderName || "Not specified",
+      grantUrl,
+      wordCount: grantWordCount,
+      message: grantUrl
+        ? "I can see that a grant URL was provided, but this static web app cannot fetch and read external pages by itself yet. Paste the full call text or upload a text/Markdown file so the analysis can be specific."
+        : "Paste the grant call text, guidelines, eligibility rules, review criteria, budget guidance, and submission instructions so the platform can produce a real analysis.",
+      nextSteps: [
+        "Paste the full grant call or guidelines into the Grant text box.",
+        "Include eligibility, purpose, review criteria, budget ceiling, deadline, required sections, attachments, restrictions, and submission route.",
+        "If you have a PDF or DOCX, copy its text into the box for now; this prototype only reads text and Markdown files directly.",
+        "After the text appears in the box, click Analyze grant again.",
+      ],
+    };
   }
 
   const eligibility = findGrantLines(lines, ["eligible", "eligibility", "applicant", "who can apply", "organization", "institution", "country"], 7);
@@ -557,6 +653,18 @@ function buildGrantAnalysis() {
   const documents = findGrantLines(lines, ["include", "attachment", "required", "proposal", "narrative", "cv", "letter", "workplan", "budget justification", "page"], 9);
   const restrictions = findGrantLines(lines, ["not eligible", "not fund", "excluded", "restriction", "ineligible", "prohibited", "cannot", "will not"], 6);
   const mission = findGrantLines(lines, ["purpose", "objective", "aim", "goal", "priority", "mission", "focus", "seeks", "intends"], 7);
+  const missionSentences = findGrantSentences(grantText, ["purpose", "objective", "aim", "goal", "priority", "mission", "focus", "seeks", "intends"], 7);
+  const reviewSentences = findGrantSentences(grantText, ["review", "evaluation", "criteria", "scoring", "merit", "selection", "assessed", "weighted"], 8);
+  const eligibilitySentences = findGrantSentences(grantText, ["eligible", "eligibility", "applicant", "who can apply", "organization", "institution", "country"], 7);
+  const budgetSentences = findGrantSentences(grantText, ["budget", "funding", "award", "ceiling", "maximum", "minimum", "cost", "indirect", "match", "allowable"], 7);
+  const deadlineSentences = findGrantSentences(grantText, ["deadline", "due", "closing", "submit by", "submission", "date"], 6);
+  const documentSentences = findGrantSentences(grantText, ["include", "attachment", "required", "proposal", "narrative", "cv", "letter", "workplan", "budget justification", "page"], 9);
+  const restrictionSentences = findGrantSentences(grantText, ["not eligible", "not fund", "excluded", "restriction", "ineligible", "prohibited", "cannot", "will not"], 6);
+
+  const dates = extractMatches(grantText, /\b(?:\d{1,2}\s+)?(?:jan(?:uary)?|feb(?:ruary)?|mar(?:ch)?|apr(?:il)?|may|jun(?:e)?|jul(?:y)?|aug(?:ust)?|sep(?:tember)?|oct(?:ober)?|nov(?:ember)?|dec(?:ember)?)\s+\d{1,2},?\s+\d{4}\b|\b\d{1,2}[/-]\d{1,2}[/-]\d{2,4}\b|\b\d{1,2}:\d{2}\s*(?:am|pm)?\b/gi, 10);
+  const amounts = extractMatches(grantText, /\b(?:USD|US\$|\$|EUR|GBP|UGX|KES|ZAR)\s?[\d,]+(?:\.\d+)?\b|\b[\d,]+(?:\.\d+)?\s?(?:USD|dollars|euros|pounds)\b/gi, 10);
+  const limits = extractMatches(grantText, /\b\d+\s?(?:pages?|words?|months?|years?|%|percent|per cent)\b/gi, 12);
+  const funderLanguage = extractFunderLanguage(grantText);
 
   const detectedThemes = [
     ["Innovation", ["innovation", "novel", "prototype", "creative", "new approach", "technology"]],
@@ -574,6 +682,7 @@ function buildGrantAnalysis() {
   const opportunityType = inferOpportunityType(combined);
   const competitionLevel = inferCompetitionLevel(lowerGrant, state.requirements.length);
   const requirementCount = state.requirements.length || findGrantLines(lines, ["must", "required", "include", "submit", "eligible"], 20).length;
+  const fitVerdict = buildFitVerdict(detectedThemes, ideaText);
 
   const strategicMoves = [
     "Mirror the language of the call in headings, objectives, outcomes, and evaluation criteria so reviewers can see fit quickly.",
@@ -645,20 +754,86 @@ function buildGrantAnalysis() {
     "Budget notes tying each cost to activities, outputs, and funder rules.",
   ];
 
+  const complianceChecklist = [
+    {
+      label: "Eligibility",
+      status: eligibility.length || eligibilitySentences.length ? "Detected" : "Needs confirmation",
+      detail: eligibilitySentences[0] || eligibility[0] || "Find applicant type, geography, legal status, partnership rules, and exclusions.",
+    },
+    {
+      label: "Deadline",
+      status: deadlines.length || deadlineSentences.length || dates.length ? "Detected" : "Needs confirmation",
+      detail: deadlineSentences[0] || deadlines[0] || dates[0] || "Find exact deadline, timezone, and submission portal.",
+    },
+    {
+      label: "Budget",
+      status: budget.length || budgetSentences.length || amounts.length ? "Detected" : "Needs confirmation",
+      detail: budgetSentences[0] || budget[0] || amounts[0] || "Find award ceiling, eligible costs, indirect rate, match, and exclusions.",
+    },
+    {
+      label: "Review criteria",
+      status: evaluation.length || reviewSentences.length ? "Detected" : "Needs inference",
+      detail: reviewSentences[0] || evaluation[0] || "Infer scoring logic from purpose, priorities, and required sections.",
+    },
+    {
+      label: "Required attachments",
+      status: documents.length || documentSentences.length ? "Detected" : "Needs confirmation",
+      detail: documentSentences[0] || documents[0] || "Find required narrative, budget forms, letters, CVs, workplan, and templates.",
+    },
+  ];
+
+  const winThemes = [
+    detectedThemes.some((theme) => theme.label === "Innovation") && "Make innovation concrete: name what is new, why it improves on current practice, and what evidence makes it plausible.",
+    detectedThemes.some((theme) => theme.label === "Impact and outcomes") && "Lead with measurable outcomes: define beneficiaries, baseline, target, and how change will be verified.",
+    detectedThemes.some((theme) => theme.label === "Equity and inclusion") && "Treat equity as design logic: access barriers, beneficiary voice, safeguards, and disaggregated indicators.",
+    detectedThemes.some((theme) => theme.label === "Evidence and learning") && "Show a learning agenda: evaluation questions, data sources, decision points, and how evidence will be used.",
+    detectedThemes.some((theme) => theme.label === "Sustainability and scale") && "Show continuation: post-grant owner, resources, integration pathway, and scale conditions.",
+    detectedThemes.some((theme) => theme.label === "Capacity and partnerships") && "Make partnerships operational: roles, commitments, governance, and coordination mechanisms.",
+  ].filter(Boolean);
+
+  const proposalOutline = [
+    "Title: use funder keywords and name the beneficiary, intervention, and intended outcome.",
+    "Problem statement: prove the gap with data, affected population, current limitation, and urgency.",
+    "Solution: explain the intervention, why it fits the gap, what is innovative, and why your team can deliver it.",
+    "Objectives and outcomes: turn funder priorities into measurable aims, outputs, outcomes, and indicators.",
+    "Methods/workplan: show phases, activities, responsible people, timeline, risks, and mitigation.",
+    "Evaluation: match the review criteria with indicators, data sources, analysis, learning loops, and accountability.",
+    "Budget: justify costs against activities and funder rules; show value for money.",
+    "Sustainability: describe post-grant ownership, resources, partnerships, reusable assets, and scale pathway.",
+  ];
+
+  const questionsToAnswer = [
+    "What exact sentence in the grant call proves your idea is eligible and aligned?",
+    "Which review criterion will be hardest for your proposal to satisfy, and what evidence will solve it?",
+    "What data will prove the problem is significant enough for this funder?",
+    "What makes your approach more credible or compelling than a standard response?",
+    "What must be true after the grant ends for the funder to see this as a successful investment?",
+  ];
+
   return {
+    status: "ready",
     opportunityType,
     funderName: funderName || "Not specified",
-    wordCount: wordCount(grantText),
+    wordCount: grantWordCount,
     requirementCount,
     competitionLevel,
     themes: detectedThemes.length ? detectedThemes : [{ label: "Mission fit", hits: 1 }, { label: "Measurable outcomes", hits: 1 }],
-    mission,
-    eligibility,
-    deadlines,
-    budget,
-    evaluation,
-    documents,
-    restrictions,
+    mission: missionSentences.length ? missionSentences : mission,
+    eligibility: eligibilitySentences.length ? eligibilitySentences : eligibility,
+    deadlines: deadlineSentences.length ? deadlineSentences : deadlines,
+    budget: budgetSentences.length ? budgetSentences : budget,
+    evaluation: reviewSentences.length ? reviewSentences : evaluation,
+    documents: documentSentences.length ? documentSentences : documents,
+    restrictions: restrictionSentences.length ? restrictionSentences : restrictions,
+    dates,
+    amounts,
+    limits,
+    funderLanguage,
+    fitVerdict,
+    complianceChecklist,
+    winThemes: winThemes.length ? winThemes : ["Make funder fit explicit by repeating the call's priorities in the problem, objectives, methods, impact, evaluation, and budget justification."],
+    proposalOutline,
+    questionsToAnswer,
     strategicMoves: uniqueItems(strategicMoves, 8),
     sectionAdvice,
     riskFlags,
@@ -685,12 +860,23 @@ function renderGrantAnalysis() {
     return;
   }
 
+  if (analysis.status === "needsText") {
+    fields.grantAnalysis.innerHTML = `
+      <div class="analysis-empty alert-card">
+        <strong>Grant text needed for expert analysis</strong>
+        <p>${escapeHtml(analysis.message)}</p>
+        ${renderList(analysis.nextSteps, "Paste the full grant guidance text, then click Analyze grant again.")}
+      </div>
+    `;
+    return;
+  }
+
   fields.grantAnalysis.innerHTML = `
     <div class="analysis-hero">
       <div>
         <p class="eyebrow">Expert read</p>
         <h4>${escapeHtml(analysis.opportunityType)}</h4>
-        <p>This looks like a ${escapeHtml(analysis.opportunityType.toLowerCase())}. The proposal should be built around funder fit, compliance, measurable outcomes, credible delivery, and evidence-backed impact.</p>
+        <p>${escapeHtml(analysis.fitVerdict)}</p>
       </div>
       <div class="analysis-stats">
         <span><strong>${analysis.wordCount}</strong> words analyzed</span>
@@ -712,6 +898,22 @@ function renderGrantAnalysis() {
         </div>
       </article>
       <article class="analysis-card">
+        <strong>Compliance verdict</strong>
+        <div class="compliance-list">
+          ${analysis.complianceChecklist
+            .map(
+              (item) => `
+                <div>
+                  <span>${escapeHtml(item.status)}</span>
+                  <strong>${escapeHtml(item.label)}</strong>
+                  <p>${escapeHtml(item.detail)}</p>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
+      </article>
+      <article class="analysis-card">
         <strong>Eligibility and fit</strong>
         ${renderList(analysis.eligibility, "Confirm applicant type, geography, organizational status, and any partnership requirements.")}
       </article>
@@ -727,12 +929,34 @@ function renderGrantAnalysis() {
         <strong>Review or scoring criteria</strong>
         ${renderList(analysis.evaluation, "Use the funder's review criteria as your proposal quality checklist.")}
       </article>
+      <article class="analysis-card">
+        <strong>Extracted rules and numbers</strong>
+        <div class="fact-list">
+          <div><span>Dates</span>${renderList(analysis.dates, "No date or time detected. Confirm deadline manually.")}</div>
+          <div><span>Money</span>${renderList(analysis.amounts, "No award amount detected. Confirm budget ceiling manually.")}</div>
+          <div><span>Limits</span>${renderList(analysis.limits, "No page, word, time, or percentage limit detected.")}</div>
+        </div>
+      </article>
     </div>
 
     <div class="analysis-wide">
       <article class="analysis-card">
         <strong>What you should do to write a strong proposal</strong>
         ${renderList(analysis.strategicMoves, "Build a compliance-first, evidence-backed proposal outline before drafting.")}
+      </article>
+      <article class="analysis-card">
+        <strong>Best proposal angle</strong>
+        ${renderList(analysis.winThemes, "Make funder fit explicit and evidence-backed throughout the application.")}
+      </article>
+      <article class="analysis-card">
+        <strong>Funder language to mirror</strong>
+        <div class="theme-row">
+          ${analysis.funderLanguage.length ? analysis.funderLanguage.map((word) => `<span>${escapeHtml(word)}</span>`).join("") : "<span>Paste more grant text</span>"}
+        </div>
+      </article>
+      <article class="analysis-card">
+        <strong>Recommended proposal outline</strong>
+        ${renderList(analysis.proposalOutline, "Build the proposal around problem, solution, objectives, methods, evaluation, budget, and sustainability.")}
       </article>
       <article class="analysis-card">
         <strong>Section-by-section writing strategy</strong>
@@ -767,6 +991,10 @@ function renderGrantAnalysis() {
       <article class="analysis-card">
         <strong>Evidence to prepare</strong>
         ${renderList(analysis.evidenceToPrepare, "Prepare data, partner evidence, evaluation indicators, and budget justification notes.")}
+      </article>
+      <article class="analysis-card">
+        <strong>Questions to answer before writing</strong>
+        ${renderList(analysis.questionsToAnswer, "Clarify eligibility, review criteria, evidence, feasibility, and post-grant success before drafting.")}
       </article>
     </div>
   `;
@@ -1181,6 +1409,19 @@ fields.documentInput.addEventListener("change", async (event) => {
   if (!file) return;
   if (!/\.(txt|md)$/i.test(file.name)) {
     fields.grantText.placeholder = "For this file type, paste extracted text here so the prototype can analyze it.";
+    state.grantAnalysis = {
+      status: "needsText",
+      funderName: fields.funderName.value.trim() || "Not specified",
+      grantUrl: fields.grantUrl.value.trim(),
+      wordCount: wordCount(fields.grantText.value),
+      message: `${file.name} was selected, but this browser prototype cannot extract text from PDF or DOCX files yet. Paste the document text into the grant text box, then run analysis again.`,
+      nextSteps: [
+        "Open the PDF or DOCX and copy the call text.",
+        "Paste eligibility, purpose, budget, review criteria, required sections, restrictions, and deadline into the grant text box.",
+        "Click Analyze grant after the text appears in the box.",
+      ],
+    };
+    renderGrantAnalysis();
     return;
   }
   fields.grantText.value = await file.text();

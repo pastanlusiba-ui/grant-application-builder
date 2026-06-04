@@ -452,6 +452,31 @@ textarea {
   margin-top: 12px;
 }
 
+.compliance-list,
+.fact-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.compliance-list div,
+.fact-list > div {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.compliance-list span,
+.fact-list span {
+  display: inline-block;
+  margin-bottom: 5px;
+  color: var(--accent-dark);
+  font-size: 0.78rem;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
 .section-advice-list div {
   padding: 10px;
   border: 1px solid var(--line);
