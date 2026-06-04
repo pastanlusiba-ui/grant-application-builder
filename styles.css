@@ -170,12 +170,14 @@ button {
   gap: 10px;
 }
 
+.project-name-field,
 .project-picker {
   min-width: 230px;
   gap: 5px;
   font-size: 0.78rem;
 }
 
+.project-name-field input,
 .project-picker select {
   width: 100%;
   border: 1px solid var(--line);
@@ -769,6 +771,10 @@ dialog {
   }
 
   .project-picker {
+    min-width: 0;
+  }
+
+  .project-name-field {
     min-width: 0;
   }
 

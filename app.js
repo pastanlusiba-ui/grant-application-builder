@@ -461,6 +461,7 @@ const sectionRubrics = {
 };
 
 const fields = {
+  projectName: document.querySelector("#projectName"),
   projectTitle: document.querySelector("#projectTitle"),
   funderName: document.querySelector("#funderName"),
   ideaText: document.querySelector("#ideaText"),
@@ -518,7 +519,7 @@ function setStoredProjects(projects) {
 }
 
 function currentProjectName() {
-  return fields.projectTitle.value.trim() || fields.funderName.value.trim() || "Untitled grant project";
+  return fields.projectName.value.trim() || fields.projectTitle.value.trim() || fields.funderName.value.trim() || "Untitled grant project";
 }
 
 function serializeCurrentProject() {
@@ -531,6 +532,7 @@ function serializeCurrentProject() {
     createdAt: now,
     activeSection: state.activeSection,
     fields: {
+      projectName: fields.projectName.value,
       projectTitle: fields.projectTitle.value,
       funderName: fields.funderName.value,
       ideaText: fields.ideaText.value,
@@ -582,6 +584,7 @@ function loadProject(projectId) {
   state.grantAnalysis = project.grantAnalysis || null;
   state.sections = { ...createBlankSections(), ...(project.sections || {}) };
 
+  fields.projectName.value = project.fields?.projectName || project.name || "";
   fields.projectTitle.value = project.fields?.projectTitle || "";
   fields.funderName.value = project.fields?.funderName || "";
   fields.ideaText.value = project.fields?.ideaText || "";
@@ -605,6 +608,7 @@ function startNewProject() {
   state.activeSection = "problem";
   state.sections = createBlankSections();
 
+  fields.projectName.value = "";
   fields.projectTitle.value = "";
   fields.funderName.value = "";
   fields.ideaText.value = "";
@@ -1479,8 +1483,10 @@ function grantAnalysisExportLines(analysis) {
 function exportBrief() {
   saveActiveDraft();
   const lines = [
-    `# ${fields.projectTitle.value || "Grant Proposal Brief"}`,
+    `# ${fields.projectName.value || fields.projectTitle.value || "Grant Proposal Brief"}`,
     "",
+    `Project name: ${fields.projectName.value || "Not specified"}`,
+    `Proposal title: ${fields.projectTitle.value || "Not specified"}`,
     `Funder: ${fields.funderName.value || "Not specified"}`,
     `Grant URL: ${fields.grantUrl.value || "Not specified"}`,
     "",
@@ -1502,7 +1508,7 @@ function exportBrief() {
   const url = URL.createObjectURL(blob);
   const link = document.createElement("a");
   link.href = url;
-  link.download = `${fields.projectTitle.value.trim().replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "grant-proposal-brief"}.md`;
+  link.download = `${currentProjectName().replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "grant-proposal-brief"}.md`;
   link.click();
   URL.revokeObjectURL(url);
 }
@@ -1519,7 +1525,7 @@ document.querySelectorAll("[data-next]").forEach((button) => {
   });
 });
 
-[fields.projectTitle, fields.funderName, fields.ideaText, fields.grantUrl, fields.grantText].forEach((field) => {
+[fields.projectName, fields.projectTitle, fields.funderName, fields.ideaText, fields.grantUrl, fields.grantText].forEach((field) => {
   field.addEventListener("input", renderReadiness);
 });
 
