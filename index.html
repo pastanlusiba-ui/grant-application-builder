@@ -128,6 +128,22 @@
               <p>Text and Markdown files are read in-browser. For PDF or DOCX, paste the extracted text into the field above for this prototype.</p>
             </div>
           </div>
+
+          <div class="grant-analysis-shell">
+            <div class="section-title-row">
+              <div>
+                <h4>Grant intelligence brief</h4>
+                <p>Expert analysis appears here after you paste the grant guidance and run analysis.</p>
+              </div>
+              <button id="analyzeGrantButton" class="secondary-button" type="button">Analyze grant</button>
+            </div>
+            <div id="grantAnalysis" class="grant-analysis" aria-live="polite">
+              <div class="analysis-empty">
+                <strong>Waiting for grant guidance</strong>
+                <p>Paste the call text, eligibility rules, evaluation criteria, budget guidance, deadlines, and required sections. The platform will translate it into proposal strategy.</p>
+              </div>
+            </div>
+          </div>
         </section>
 
         <section class="panel" id="requirements">

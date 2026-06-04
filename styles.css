@@ -290,6 +290,8 @@ textarea {
 
 .insight-strip article,
 .upload-zone,
+.grant-analysis-shell,
+.analysis-card,
 .guidance-box,
 .problem-rubric,
 .review-findings,
@@ -322,6 +324,147 @@ textarea {
   gap: 16px;
   margin-top: 16px;
   padding: 16px;
+}
+
+.grant-analysis-shell {
+  display: grid;
+  gap: 16px;
+  margin-top: 18px;
+  padding: 16px;
+}
+
+.grant-analysis-shell .section-title-row {
+  align-items: start;
+}
+
+.grant-analysis-shell .section-title-row p {
+  margin: 5px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.grant-analysis {
+  display: grid;
+  gap: 14px;
+}
+
+.analysis-empty {
+  padding: 16px;
+  border: 1px dashed var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.analysis-empty p {
+  margin: 7px 0 0;
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.analysis-hero {
+  display: grid;
+  grid-template-columns: 1fr 260px;
+  gap: 16px;
+  padding: 18px;
+  border-radius: 8px;
+  background: #202124;
+  color: #fff;
+}
+
+.analysis-hero .eyebrow {
+  color: var(--lime);
+}
+
+.analysis-hero p {
+  margin: 8px 0 0;
+  color: rgba(255, 255, 255, 0.72);
+  line-height: 1.5;
+}
+
+.analysis-stats {
+  display: grid;
+  gap: 8px;
+}
+
+.analysis-stats span {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 8px;
+  color: rgba(255, 255, 255, 0.76);
+}
+
+.analysis-stats strong {
+  color: #fff;
+}
+
+.analysis-grid,
+.analysis-wide {
+  display: grid;
+  gap: 12px;
+}
+
+.analysis-grid {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.analysis-card {
+  padding: 15px;
+}
+
+.analysis-card p,
+.analysis-card li {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.analysis-card ul {
+  margin: 10px 0 0;
+  padding-left: 19px;
+}
+
+.alert-card {
+  border-color: #fecdd3;
+  background: #fff7f8;
+}
+
+.theme-row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 12px;
+}
+
+.theme-row span {
+  padding: 6px 8px;
+  border-radius: 999px;
+  background: #fff1f4;
+  color: var(--accent-dark);
+  font-size: 0.82rem;
+  font-weight: 750;
+}
+
+.section-advice-list {
+  display: grid;
+  gap: 10px;
+  margin-top: 12px;
+}
+
+.section-advice-list div {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.section-advice-list span {
+  font-weight: 800;
+}
+
+.section-advice-list p {
+  margin: 5px 0 0;
 }
 
 .split-layout {
@@ -538,7 +681,9 @@ dialog {
   .app-shell,
   .split-layout,
   .builder-layout,
-  .review-grid {
+  .review-grid,
+  .analysis-hero,
+  .analysis-grid {
     grid-template-columns: 1fr;
   }
 

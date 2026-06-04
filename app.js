@@ -1,6 +1,7 @@
 const state = {
   requirements: [],
   priorities: [],
+  grantAnalysis: null,
   activeSection: "problem",
   sections: {
     problem: "",
@@ -465,6 +466,7 @@ const fields = {
   grantUrl: document.querySelector("#grantUrl"),
   grantText: document.querySelector("#grantText"),
   documentInput: document.querySelector("#documentInput"),
+  grantAnalysis: document.querySelector("#grantAnalysis"),
   requirementsList: document.querySelector("#requirementsList"),
   priorityList: document.querySelector("#priorityList"),
   sectionTabs: document.querySelector("#sectionTabs"),
@@ -486,6 +488,288 @@ function normalizeLines(text) {
     .split(/\n+/)
     .map((line) => line.trim())
     .filter(Boolean);
+}
+
+function uniqueItems(items, limit = 8) {
+  const seen = new Set();
+  return items
+    .map((item) => item.replace(/\s+/g, " ").trim())
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (!item || seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .slice(0, limit);
+}
+
+function findGrantLines(lines, keywords, limit = 6) {
+  const lowered = keywords.map((keyword) => keyword.toLowerCase());
+  return uniqueItems(
+    lines.filter((line) => {
+      const text = line.toLowerCase();
+      return lowered.some((keyword) => text.includes(keyword));
+    }),
+    limit,
+  );
+}
+
+function countKeywordHits(text, keywords) {
+  return keywords.reduce((count, keyword) => count + (text.includes(keyword) ? 1 : 0), 0);
+}
+
+function inferOpportunityType(text) {
+  const types = [
+    { label: "Research grant", keywords: ["research", "study", "hypothesis", "methodology", "investigator", "data", "publication"] },
+    { label: "Implementation or service delivery grant", keywords: ["implementation", "program", "service", "beneficiaries", "community", "delivery", "activities"] },
+    { label: "Innovation challenge", keywords: ["innovation", "prototype", "pilot", "novel", "technology", "challenge", "breakthrough"] },
+    { label: "Capacity strengthening grant", keywords: ["capacity", "training", "technical assistance", "institutional", "skills", "workforce"] },
+    { label: "Evaluation or learning grant", keywords: ["evaluation", "learning", "evidence", "monitoring", "indicators", "outcomes"] },
+  ];
+  const scored = types.map((type) => ({ ...type, score: countKeywordHits(text, type.keywords) })).sort((a, b) => b.score - a.score);
+  return scored[0].score ? scored[0].label : "Open grant opportunity";
+}
+
+function inferCompetitionLevel(text, requirementCount) {
+  const competitiveTerms = ["competitive", "review", "scoring", "merit", "criteria", "selection", "panel", "shortlist", "interview"];
+  const score = countKeywordHits(text, competitiveTerms) + Math.min(requirementCount, 8);
+  if (score >= 10) return "High discipline: the call gives many rules or review signals, so compliance and scoring alignment will matter heavily.";
+  if (score >= 5) return "Moderate discipline: the call gives enough review signals that your proposal should mirror them clearly.";
+  return "Broad opportunity: you will need to infer reviewer expectations from the mission, eligibility, and required sections.";
+}
+
+function buildGrantAnalysis() {
+  const grantText = fields.grantText.value.trim();
+  const ideaText = fields.ideaText.value.trim();
+  const funderName = fields.funderName.value.trim();
+  const lines = normalizeLines(grantText);
+  const lowerGrant = grantText.toLowerCase();
+  const combined = `${grantText}\n${ideaText}`.toLowerCase();
+
+  if (wordCount(grantText) < 25 && !fields.grantUrl.value.trim()) {
+    return null;
+  }
+
+  const eligibility = findGrantLines(lines, ["eligible", "eligibility", "applicant", "who can apply", "organization", "institution", "country"], 7);
+  const deadlines = findGrantLines(lines, ["deadline", "due", "closing", "submit by", "submission", "date"], 6);
+  const budget = findGrantLines(lines, ["budget", "funding", "award", "ceiling", "maximum", "minimum", "cost", "indirect", "match", "allowable"], 7);
+  const evaluation = findGrantLines(lines, ["review", "evaluation", "criteria", "scoring", "merit", "selection", "assessed", "weighted"], 8);
+  const documents = findGrantLines(lines, ["include", "attachment", "required", "proposal", "narrative", "cv", "letter", "workplan", "budget justification", "page"], 9);
+  const restrictions = findGrantLines(lines, ["not eligible", "not fund", "excluded", "restriction", "ineligible", "prohibited", "cannot", "will not"], 6);
+  const mission = findGrantLines(lines, ["purpose", "objective", "aim", "goal", "priority", "mission", "focus", "seeks", "intends"], 7);
+
+  const detectedThemes = [
+    ["Innovation", ["innovation", "novel", "prototype", "creative", "new approach", "technology"]],
+    ["Impact and outcomes", ["impact", "outcome", "beneficiary", "results", "change", "effectiveness"]],
+    ["Equity and inclusion", ["equity", "gender", "inclusion", "underserved", "marginalized", "disability"]],
+    ["Evidence and learning", ["evidence", "data", "research", "learning", "evaluation", "knowledge"]],
+    ["Sustainability and scale", ["sustainability", "scale", "replication", "systems", "institutionalization", "partnership"]],
+    ["Capacity and partnerships", ["capacity", "training", "partner", "collaboration", "institution", "stakeholder"]],
+  ]
+    .map(([label, keywords]) => ({ label, hits: countKeywordHits(combined, keywords) }))
+    .filter((theme) => theme.hits > 0)
+    .sort((a, b) => b.hits - a.hits)
+    .slice(0, 5);
+
+  const opportunityType = inferOpportunityType(combined);
+  const competitionLevel = inferCompetitionLevel(lowerGrant, state.requirements.length);
+  const requirementCount = state.requirements.length || findGrantLines(lines, ["must", "required", "include", "submit", "eligible"], 20).length;
+
+  const strategicMoves = [
+    "Mirror the language of the call in headings, objectives, outcomes, and evaluation criteria so reviewers can see fit quickly.",
+    "Build a compliance-first outline before drafting: eligibility, required sections, attachments, page limits, budget rules, deadline, and submission route.",
+    "Open with a sharp problem statement, then show a credible pathway from problem to solution, outputs, outcomes, evaluation, and sustainability.",
+    "Turn every broad promise into evidence, metrics, named beneficiaries, timeline, partner role, and a realistic delivery mechanism.",
+    "Use the scoring or evaluation criteria as the proposal's internal quality checklist before submission.",
+  ];
+
+  if (detectedThemes.some((theme) => theme.label === "Innovation")) {
+    strategicMoves.push("Make the innovation concrete: explain what is new, why it matters, and why it is feasible rather than merely novel.");
+  }
+  if (detectedThemes.some((theme) => theme.label === "Equity and inclusion")) {
+    strategicMoves.push("Show equity in the design, not only in wording: beneficiary selection, participation, access barriers, safeguards, and indicators.");
+  }
+  if (detectedThemes.some((theme) => theme.label === "Sustainability and scale")) {
+    strategicMoves.push("Include a sustainability pathway that names post-grant ownership, resources, systems, and scale conditions.");
+  }
+
+  const sectionAdvice = [
+    {
+      label: "Problem statement",
+      text: "Use the grant priorities to frame the gap. Show who is affected, where, evidence of magnitude, existing gaps, and why this funder should care.",
+    },
+    {
+      label: "Proposed solution",
+      text: "Describe the intervention with enough specificity that reviewers can picture delivery, novelty, feasibility, and fit with the call.",
+    },
+    {
+      label: "Objectives",
+      text: "Convert the call's priorities into 3-5 measurable objectives with target groups, indicators, timelines, and expected outcomes.",
+    },
+    {
+      label: "Methods",
+      text: "Write a phased workplan that proves feasibility: activities, roles, timeline, assumptions, risks, mitigation, and quality controls.",
+    },
+    {
+      label: "Impact",
+      text: "Connect benefits to the funder's mission and reviewer criteria. Distinguish direct outputs from outcomes and longer-term change.",
+    },
+    {
+      label: "Evaluation",
+      text: "Use the call's evaluation language to select indicators, data sources, frequency, responsible people, and learning loops.",
+    },
+    {
+      label: "Budget",
+      text: "Justify every cost against activities and rules. Flag ceilings, matching funds, indirect costs, allowable costs, and value for money.",
+    },
+    {
+      label: "Sustainability",
+      text: "Explain what remains after funding: capacity, tools, partnerships, institutional ownership, data, and realistic scale or replication.",
+    },
+  ];
+
+  const riskFlags = [
+    !eligibility.length && "Eligibility rules are not clearly detected. Confirm who can apply before investing writing time.",
+    !deadlines.length && "Deadline and submission route are not clearly detected. Record exact date, timezone, portal, and required attachments.",
+    !budget.length && "Budget ceiling and cost rules are not clearly detected. Confirm award amount, indirect rules, match, and excluded costs.",
+    !evaluation.length && "Evaluation criteria are not clearly detected. If the call does not state them, infer criteria from mission, priorities, and required sections.",
+    !documents.length && "Required documents and format rules are not fully detected. Check page limits, attachments, letters, CVs, and templates.",
+    restrictions.length > 0 && "Restrictions were detected. Read them carefully so the proposal does not include ineligible costs, applicants, activities, or geographies.",
+  ].filter(Boolean);
+
+  const evidenceToPrepare = [
+    "Recent data proving the problem's scale, severity, and affected population.",
+    "Funder-aligned rationale showing why your approach is credible and timely.",
+    "Partner roles, letters, permissions, or institutional commitments if collaboration is required.",
+    "SMART indicators, baselines where possible, targets, and data sources.",
+    "Budget notes tying each cost to activities, outputs, and funder rules.",
+  ];
+
+  return {
+    opportunityType,
+    funderName: funderName || "Not specified",
+    wordCount: wordCount(grantText),
+    requirementCount,
+    competitionLevel,
+    themes: detectedThemes.length ? detectedThemes : [{ label: "Mission fit", hits: 1 }, { label: "Measurable outcomes", hits: 1 }],
+    mission,
+    eligibility,
+    deadlines,
+    budget,
+    evaluation,
+    documents,
+    restrictions,
+    strategicMoves: uniqueItems(strategicMoves, 8),
+    sectionAdvice,
+    riskFlags,
+    evidenceToPrepare,
+  };
+}
+
+function renderList(items, emptyText) {
+  const safeItems = items && items.length ? items : [emptyText];
+  return `<ul>${safeItems.map((item) => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+}
+
+function renderGrantAnalysis() {
+  if (!fields.grantAnalysis) return;
+  const analysis = state.grantAnalysis;
+
+  if (!analysis) {
+    fields.grantAnalysis.innerHTML = `
+      <div class="analysis-empty">
+        <strong>Waiting for grant guidance</strong>
+        <p>Paste the call text, eligibility rules, evaluation criteria, budget guidance, deadlines, and required sections. The platform will translate it into proposal strategy.</p>
+      </div>
+    `;
+    return;
+  }
+
+  fields.grantAnalysis.innerHTML = `
+    <div class="analysis-hero">
+      <div>
+        <p class="eyebrow">Expert read</p>
+        <h4>${escapeHtml(analysis.opportunityType)}</h4>
+        <p>This looks like a ${escapeHtml(analysis.opportunityType.toLowerCase())}. The proposal should be built around funder fit, compliance, measurable outcomes, credible delivery, and evidence-backed impact.</p>
+      </div>
+      <div class="analysis-stats">
+        <span><strong>${analysis.wordCount}</strong> words analyzed</span>
+        <span><strong>${analysis.requirementCount}</strong> requirement signals</span>
+        <span><strong>${analysis.themes.length}</strong> priority themes</span>
+      </div>
+    </div>
+
+    <div class="analysis-grid">
+      <article class="analysis-card">
+        <strong>What the grant is asking for</strong>
+        ${renderList(analysis.mission, "Summarize the funder's purpose, priorities, and desired outcomes from the call text.")}
+      </article>
+      <article class="analysis-card">
+        <strong>Likely reviewer focus</strong>
+        <p>${escapeHtml(analysis.competitionLevel)}</p>
+        <div class="theme-row">
+          ${analysis.themes.map((theme) => `<span>${escapeHtml(theme.label)}</span>`).join("")}
+        </div>
+      </article>
+      <article class="analysis-card">
+        <strong>Eligibility and fit</strong>
+        ${renderList(analysis.eligibility, "Confirm applicant type, geography, organizational status, and any partnership requirements.")}
+      </article>
+      <article class="analysis-card">
+        <strong>Deadline and submission</strong>
+        ${renderList(analysis.deadlines, "Record the exact deadline, timezone, portal, submission sequence, and confirmation process.")}
+      </article>
+      <article class="analysis-card">
+        <strong>Budget intelligence</strong>
+        ${renderList(analysis.budget, "Confirm award ceiling, eligible costs, indirect costs, matching rules, and budget justification format.")}
+      </article>
+      <article class="analysis-card">
+        <strong>Review or scoring criteria</strong>
+        ${renderList(analysis.evaluation, "Use the funder's review criteria as your proposal quality checklist.")}
+      </article>
+    </div>
+
+    <div class="analysis-wide">
+      <article class="analysis-card">
+        <strong>What you should do to write a strong proposal</strong>
+        ${renderList(analysis.strategicMoves, "Build a compliance-first, evidence-backed proposal outline before drafting.")}
+      </article>
+      <article class="analysis-card">
+        <strong>Section-by-section writing strategy</strong>
+        <div class="section-advice-list">
+          ${analysis.sectionAdvice
+            .map(
+              (item) => `
+                <div>
+                  <span>${escapeHtml(item.label)}</span>
+                  <p>${escapeHtml(item.text)}</p>
+                </div>
+              `,
+            )
+            .join("")}
+        </div>
+      </article>
+    </div>
+
+    <div class="analysis-grid">
+      <article class="analysis-card alert-card">
+        <strong>Risks to clarify before drafting</strong>
+        ${renderList(analysis.riskFlags, "No major missing grant-intake signals detected. Still verify the official call manually before submission.")}
+      </article>
+      <article class="analysis-card">
+        <strong>Required documents and format clues</strong>
+        ${renderList(analysis.documents, "Check required sections, templates, attachments, page limits, CVs, letters, and budget forms.")}
+      </article>
+      <article class="analysis-card">
+        <strong>Restrictions or exclusions</strong>
+        ${renderList(analysis.restrictions, "No restrictions detected in the pasted text. Recheck the full call for ineligible costs, activities, applicants, and geographies.")}
+      </article>
+      <article class="analysis-card">
+        <strong>Evidence to prepare</strong>
+        ${renderList(analysis.evidenceToPrepare, "Prepare data, partner evidence, evaluation indicators, and budget justification notes.")}
+      </article>
+    </div>
+  `;
 }
 
 function detectRequirements() {
@@ -524,6 +808,8 @@ function detectRequirements() {
       ];
 
   detectPriorities();
+  state.grantAnalysis = buildGrantAnalysis();
+  renderGrantAnalysis();
   renderRequirements();
   renderReadiness();
 }
@@ -800,6 +1086,29 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function grantAnalysisExportLines(analysis) {
+  if (!analysis) return [];
+  return [
+    "## Grant Intelligence Brief",
+    `Opportunity type: ${analysis.opportunityType}`,
+    `Funder: ${analysis.funderName}`,
+    `Reviewer discipline: ${analysis.competitionLevel}`,
+    "",
+    "### Priority Themes",
+    ...analysis.themes.map((theme) => `- ${theme.label}`),
+    "",
+    "### What The Grant Is Asking For",
+    ...(analysis.mission.length ? analysis.mission : ["Confirm the funder's purpose, priorities, and desired outcomes from the call text."]).map((item) => `- ${item}`),
+    "",
+    "### Proposal Strategy",
+    ...analysis.strategicMoves.map((item) => `- ${item}`),
+    "",
+    "### Risks To Clarify",
+    ...(analysis.riskFlags.length ? analysis.riskFlags : ["No major missing grant-intake signals detected. Still verify the official call manually."]).map((item) => `- ${item}`),
+    "",
+  ];
+}
+
 function exportBrief() {
   saveActiveDraft();
   const lines = [
@@ -817,6 +1126,7 @@ function exportBrief() {
     "## Funder Priorities",
     ...state.priorities.map((priority) => `- ${priority.label}: ${priority.note}`),
     "",
+    ...grantAnalysisExportLines(state.grantAnalysis),
     "## Proposal Sections",
     ...sectionBlueprints.flatMap((section) => [`### ${section.title}`, state.sections[section.id] || "Not drafted yet.", ""]),
   ];
@@ -848,6 +1158,7 @@ document.querySelectorAll("[data-next]").forEach((button) => {
 
 fields.grantText.addEventListener("blur", detectRequirements);
 fields.sectionDraft.addEventListener("input", saveActiveDraft);
+document.querySelector("#analyzeGrantButton").addEventListener("click", detectRequirements);
 document.querySelector("#insertPromptButton").addEventListener("click", insertGuidePrompts);
 document.querySelector("#runReviewButton").addEventListener("click", runReview);
 document.querySelector("#exportButton").addEventListener("click", exportBrief);
