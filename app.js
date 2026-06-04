@@ -3,7 +3,6 @@ const state = {
   priorities: [],
   grantAnalysis: null,
   grantDocumentName: "",
-  guidePromptsOpen: {},
   currentProjectId: "",
   activeSection: "problem",
   sections: {
@@ -477,7 +476,6 @@ const fields = {
   activeSectionTitle: document.querySelector("#activeSectionTitle"),
   activeSectionGoal: document.querySelector("#activeSectionGoal"),
   sectionGuidance: document.querySelector("#sectionGuidance"),
-  insertedGuides: document.querySelector("#insertedGuides"),
   sectionDraft: document.querySelector("#sectionDraft"),
   problemRubric: document.querySelector("#problemRubric"),
   reviewFindings: document.querySelector("#reviewFindings"),
@@ -546,7 +544,6 @@ function serializeCurrentProject() {
     requirements: state.requirements,
     priorities: state.priorities,
     grantAnalysis: state.grantAnalysis,
-    guidePromptsOpen: state.guidePromptsOpen,
     sections: state.sections,
   };
 }
@@ -560,6 +557,42 @@ function renderProjectSelect() {
     })
     .join("")}`;
   fields.projectSelect.value = state.currentProjectId;
+}
+
+function textToEditorHtml(text) {
+  return escapeHtml(text || "")
+    .replace(/\n{2,}/g, (match) => "<br>".repeat(match.length))
+    .replace(/\n/g, "<br>");
+}
+
+function getSectionDraftText() {
+  const draftPart = fields.sectionDraft.querySelector(".draft-text")?.innerText || fields.sectionDraft.innerText || "";
+  const guidePart = fields.sectionDraft.querySelector(".guide-note-block pre")?.innerText || "";
+  return `${draftPart.trim()}${guidePart.trim() ? `\n\n${guidePart.trim()}` : ""}`.replace(/\u00a0/g, " ").trim();
+}
+
+function renderSectionEditor(text) {
+  text = text || "";
+  const markerIndex = text.indexOf("Guiding notes:");
+  const draftText = markerIndex >= 0 ? text.slice(0, markerIndex).trim() : text.trim();
+  const guideText = markerIndex >= 0 ? text.slice(markerIndex).trim() : "";
+
+  if (!draftText && !guideText) {
+    fields.sectionDraft.innerHTML = "";
+    return;
+  }
+
+  fields.sectionDraft.innerHTML = `
+    ${
+      guideText
+        ? `<div class="guide-note-block" contenteditable="false">
+            <strong>Guide prompts</strong>
+            <pre>${escapeHtml(guideText)}</pre>
+          </div>`
+        : ""
+    }
+    <div class="draft-text">${draftText ? textToEditorHtml(draftText) : ""}</div>
+  `;
 }
 
 function saveCurrentProject() {
@@ -587,7 +620,6 @@ function loadProject(projectId) {
   state.requirements = project.requirements || [];
   state.priorities = project.priorities || [];
   state.grantAnalysis = project.grantAnalysis || null;
-  state.guidePromptsOpen = project.guidePromptsOpen || {};
   state.sections = { ...createBlankSections(), ...(project.sections || {}) };
 
   fields.projectName.value = project.fields?.projectName || project.name || "";
@@ -612,7 +644,6 @@ function startNewProject() {
   state.requirements = [];
   state.priorities = [];
   state.grantAnalysis = null;
-  state.guidePromptsOpen = {};
   state.activeSection = "problem";
   state.sections = createBlankSections();
 
@@ -622,7 +653,7 @@ function startNewProject() {
   fields.ideaText.value = "";
   fields.grantUrl.value = "";
   fields.grantText.value = "";
-  fields.sectionDraft.value = "";
+  renderSectionEditor("");
   state.grantDocumentName = "";
 
   renderProjectSelect();
@@ -1424,59 +1455,29 @@ function renderActiveSection() {
   const section = sectionBlueprints.find((item) => item.id === state.activeSection);
   fields.activeSectionTitle.textContent = section.title;
   fields.activeSectionGoal.textContent = section.goal;
-  fields.sectionDraft.value = state.sections[section.id];
+  renderSectionEditor(state.sections[section.id]);
   fields.sectionGuidance.innerHTML = `
     <strong>${section.id === "problem" ? "Problem statement guidance built into this platform" : "Reviewer guidance built into this platform"}</strong>
     <ul>${section.prompts.map((prompt) => `<li>${escapeHtml(prompt)}</li>`).join("")}</ul>
   `;
-  renderInsertedGuidePrompts();
   renderSectionRubric();
-}
-
-function renderInsertedGuidePrompts() {
-  const section = sectionBlueprints.find((item) => item.id === state.activeSection);
-  const rubric = sectionRubrics[section.id];
-  const isOpen = Boolean(state.guidePromptsOpen[section.id]);
-
-  fields.insertedGuides.hidden = !isOpen;
-  document.querySelector("#insertPromptButton").textContent = isOpen ? "Hide guide prompts" : "Show guide prompts";
-
-  if (!isOpen) {
-    fields.insertedGuides.innerHTML = "";
-    return;
-  }
-
-  fields.insertedGuides.innerHTML = `
-    <div class="inserted-guides-header">
-      <strong>Guide prompts for ${escapeHtml(section.title)}</strong>
-      <span>Use these as reference. They are not part of your draft.</span>
-    </div>
-    <div class="guide-columns">
-      <div>
-        <strong>Writing prompts</strong>
-        <ul>${section.prompts.map((prompt) => `<li>${escapeHtml(prompt)}</li>`).join("")}</ul>
-      </div>
-      ${
-        rubric
-          ? `<div>
-              <strong>Reviewer rubric</strong>
-              <ul>${rubric.items.map((item) => `<li><b>${escapeHtml(item.label)}:</b> ${escapeHtml(item.guidance)}</li>`).join("")}</ul>
-            </div>`
-          : ""
-      }
-    </div>
-  `;
 }
 
 function insertGuidePrompts() {
   const section = sectionBlueprints.find((item) => item.id === state.activeSection);
-  state.guidePromptsOpen[section.id] = !state.guidePromptsOpen[section.id];
-  renderInsertedGuidePrompts();
+  const rubric = sectionRubrics[section.id];
+  const currentDraft = draftCoreText(getSectionDraftText()).trim();
+  const rubricText = rubric
+    ? `\n\nRequired reviewer-rubric elements (${rubric.source}):\n${rubric.items.map((item) => `- ${item.label}: ${item.guidance}`).join("\n")}`
+    : "";
+  const promptText = section.prompts.map((prompt) => `- ${prompt}`).join("\n");
+  state.sections[section.id] = `${currentDraft}\n\nGuiding notes:\n${promptText}${rubricText}`.trim();
+  renderSectionEditor(state.sections[section.id]);
   renderReadiness();
 }
 
 function saveActiveDraft() {
-  state.sections[state.activeSection] = fields.sectionDraft.value;
+  state.sections[state.activeSection] = getSectionDraftText();
   renderSectionRubric();
   renderReadiness();
 }
@@ -1490,7 +1491,7 @@ function renderSectionRubric() {
   }
 
   fields.problemRubric.hidden = false;
-  const text = draftCoreText(state.sections[section.id] || fields.sectionDraft.value);
+  const text = draftCoreText(state.sections[section.id] || getSectionDraftText());
   const results = rubric.items.map((item) => ({ ...item, met: item.patterns.some((pattern) => pattern.test(text)) }));
   const metCount = results.filter((item) => item.met).length;
 
