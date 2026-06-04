@@ -1,0 +1,226 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>GrantCraft Studio</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <div class="app-shell">
+      <aside class="sidebar">
+        <div class="brand">
+          <span class="brand-mark">GC</span>
+          <div>
+            <h1>GrantCraft Studio</h1>
+            <p>Proposal builder</p>
+          </div>
+        </div>
+
+        <nav class="steps" aria-label="Proposal workflow">
+          <button class="step is-active" data-panel="idea">
+            <span>1</span>
+            Idea brief
+          </button>
+          <button class="step" data-panel="grant">
+            <span>2</span>
+            Grant intake
+          </button>
+          <button class="step" data-panel="requirements">
+            <span>3</span>
+            Requirements
+          </button>
+          <button class="step" data-panel="builder">
+            <span>4</span>
+            Section writer
+          </button>
+          <button class="step" data-panel="review">
+            <span>5</span>
+            Excellence review
+          </button>
+        </nav>
+
+        <div class="progress-card">
+          <div class="progress-top">
+            <span>Proposal readiness</span>
+            <strong id="readinessScore">0%</strong>
+          </div>
+          <div class="progress-track">
+            <div id="readinessBar"></div>
+          </div>
+          <p id="readinessHint">Start by describing your idea and funder opportunity.</p>
+        </div>
+      </aside>
+
+      <main class="workspace">
+        <header class="topbar">
+          <div>
+            <p class="eyebrow">Personal grant application platform</p>
+            <h2 id="workspaceTitle">Build an award-ready proposal</h2>
+          </div>
+          <button id="exportButton" class="secondary-button" type="button">Export brief</button>
+        </header>
+
+        <section class="panel is-visible" id="idea">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Step 1</p>
+              <h3>Frame the work clearly</h3>
+            </div>
+            <button class="primary-button" data-next="grant" type="button">Continue</button>
+          </div>
+
+          <div class="form-grid">
+            <label>
+              Proposed title
+              <input id="projectTitle" type="text" placeholder="Example: Climate-smart seed systems for smallholder farmers" />
+            </label>
+            <label>
+              Target funder or grant name
+              <input id="funderName" type="text" placeholder="Example: Grand Challenges, USAID, Gates Foundation" />
+            </label>
+            <label class="full-width">
+              Your idea
+              <textarea id="ideaText" rows="8" placeholder="Explain the problem, your proposed solution, who benefits, where it will happen, and why your approach is different."></textarea>
+            </label>
+          </div>
+
+          <div class="insight-strip">
+            <article>
+              <strong>Strong title</strong>
+              <p>Names the intervention, audience, and outcome without sounding generic.</p>
+            </article>
+            <article>
+              <strong>Sharp idea</strong>
+              <p>Connects need, evidence, implementation plan, and measurable change.</p>
+            </article>
+            <article>
+              <strong>Funder fit</strong>
+              <p>Shows why this opportunity is the right home for the proposal.</p>
+            </article>
+          </div>
+        </section>
+
+        <section class="panel" id="grant">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Step 2</p>
+              <h3>Load the grant opportunity</h3>
+            </div>
+            <button class="primary-button" data-next="requirements" type="button">Analyze requirements</button>
+          </div>
+
+          <div class="form-grid">
+            <label class="full-width">
+              Grant URL
+              <input id="grantUrl" type="url" placeholder="Paste a link to the call for proposals" />
+            </label>
+            <label class="full-width">
+              Grant text, guidelines, or pasted document contents
+              <textarea id="grantText" rows="12" placeholder="Paste eligibility criteria, objectives, budget rules, evaluation criteria, required sections, page limits, deadlines, and submission instructions."></textarea>
+            </label>
+          </div>
+
+          <div class="upload-zone">
+            <input id="documentInput" type="file" accept=".txt,.md,.pdf,.doc,.docx" />
+            <div>
+              <strong>Document intake</strong>
+              <p>Text and Markdown files are read in-browser. For PDF or DOCX, paste the extracted text into the field above for this prototype.</p>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="requirements">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Step 3</p>
+              <h3>Do not miss a requirement</h3>
+            </div>
+            <button class="primary-button" data-next="builder" type="button">Start writing</button>
+          </div>
+
+          <div class="split-layout">
+            <div>
+              <div class="section-title-row">
+                <h4>Detected requirements</h4>
+                <button id="addRequirementButton" class="icon-button" type="button" aria-label="Add requirement">+</button>
+              </div>
+              <div id="requirementsList" class="checklist"></div>
+            </div>
+            <div>
+              <h4>Funder priorities</h4>
+              <div id="priorityList" class="priority-list"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="builder">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Step 4</p>
+              <h3>Write section by section</h3>
+            </div>
+            <button class="primary-button" data-next="review" type="button">Review proposal</button>
+          </div>
+
+          <div class="builder-layout">
+            <aside class="section-tabs" id="sectionTabs"></aside>
+            <div class="writer">
+              <div class="writer-header">
+                <div>
+                  <h4 id="activeSectionTitle">Problem statement</h4>
+                  <p id="activeSectionGoal">Explain the need with evidence and urgency.</p>
+                </div>
+                <button id="insertPromptButton" class="secondary-button" type="button">Insert guide prompts</button>
+              </div>
+              <div id="sectionGuidance" class="guidance-box"></div>
+              <textarea id="sectionDraft" rows="16" placeholder="Write this section here. The review panel will check for completeness, quality, and funder fit."></textarea>
+              <div id="problemRubric" class="problem-rubric" aria-live="polite"></div>
+            </div>
+          </div>
+        </section>
+
+        <section class="panel" id="review">
+          <div class="panel-heading">
+            <div>
+              <p class="eyebrow">Step 5</p>
+              <h3>Excellence review</h3>
+            </div>
+            <button id="runReviewButton" class="primary-button" type="button">Run review</button>
+          </div>
+
+          <div class="review-grid">
+            <div class="scoreboard">
+              <div>
+                <span>Completeness</span>
+                <strong id="completenessScore">0</strong>
+              </div>
+              <div>
+                <span>Persuasiveness</span>
+                <strong id="persuasivenessScore">0</strong>
+              </div>
+              <div>
+                <span>Funder fit</span>
+                <strong id="fitScore">0</strong>
+              </div>
+            </div>
+            <div id="reviewFindings" class="review-findings"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <dialog id="requirementDialog">
+      <form method="dialog" class="dialog-card">
+        <h3>Add requirement</h3>
+        <input id="newRequirementText" type="text" placeholder="Example: Include a gender equality plan" />
+        <div class="dialog-actions">
+          <button class="secondary-button" value="cancel" type="submit">Cancel</button>
+          <button id="saveRequirementButton" class="primary-button" value="default" type="submit">Save</button>
+        </div>
+      </form>
+    </dialog>
+
+    <script src="app.js"></script>
+  </body>
+</html>
