@@ -2,6 +2,7 @@ const state = {
   requirements: [],
   priorities: [],
   grantAnalysis: null,
+  grantDocumentName: "",
   currentProjectId: "",
   activeSection: "problem",
   sections: {
@@ -531,13 +532,14 @@ function serializeCurrentProject() {
     updatedAt: now,
     createdAt: now,
     activeSection: state.activeSection,
-    fields: {
+  fields: {
       projectName: fields.projectName.value,
       projectTitle: fields.projectTitle.value,
       funderName: fields.funderName.value,
       ideaText: fields.ideaText.value,
       grantUrl: fields.grantUrl.value,
       grantText: fields.grantText.value,
+      grantDocumentName: state.grantDocumentName,
     },
     requirements: state.requirements,
     priorities: state.priorities,
@@ -590,6 +592,7 @@ function loadProject(projectId) {
   fields.ideaText.value = project.fields?.ideaText || "";
   fields.grantUrl.value = project.fields?.grantUrl || "";
   fields.grantText.value = project.fields?.grantText || "";
+  state.grantDocumentName = project.fields?.grantDocumentName || "";
 
   renderProjectSelect();
   renderRequirements();
@@ -615,6 +618,7 @@ function startNewProject() {
   fields.grantUrl.value = "";
   fields.grantText.value = "";
   fields.sectionDraft.value = "";
+  state.grantDocumentName = "";
 
   renderProjectSelect();
   renderRequirements();
@@ -659,6 +663,167 @@ function findGrantLines(lines, keywords, limit = 6) {
 
 function countKeywordHits(text, keywords) {
   return keywords.reduce((count, keyword) => count + (text.includes(keyword) ? 1 : 0), 0);
+}
+
+function setAnalysisStatus(message) {
+  if (!fields.grantAnalysis) return;
+  fields.grantAnalysis.innerHTML = `
+    <div class="analysis-empty">
+      <strong>Preparing grant analysis</strong>
+      <p>${escapeHtml(message)}</p>
+    </div>
+  `;
+}
+
+function loadScriptOnce(src, globalName) {
+  return new Promise((resolve, reject) => {
+    if (globalName && window[globalName]) {
+      resolve(window[globalName]);
+      return;
+    }
+
+    const existing = document.querySelector(`script[src="${src}"]`);
+    if (existing) {
+      existing.addEventListener("load", () => resolve(globalName ? window[globalName] : true), { once: true });
+      existing.addEventListener("error", reject, { once: true });
+      return;
+    }
+
+    const script = document.createElement("script");
+    script.src = src;
+    script.async = true;
+    script.addEventListener("load", () => resolve(globalName ? window[globalName] : true), { once: true });
+    script.addEventListener("error", () => reject(new Error(`Could not load ${src}`)), { once: true });
+    document.head.appendChild(script);
+  });
+}
+
+async function extractPdfText(file) {
+  setAnalysisStatus(`Reading ${file.name} as a PDF...`);
+  const pdfjs = await import("https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.mjs");
+  pdfjs.GlobalWorkerOptions.workerSrc = "https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.worker.mjs";
+  const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
+  const pageTexts = [];
+
+  for (let pageNumber = 1; pageNumber <= pdf.numPages; pageNumber += 1) {
+    const page = await pdf.getPage(pageNumber);
+    const content = await page.getTextContent();
+    pageTexts.push(content.items.map((item) => item.str).join(" "));
+  }
+
+  return pageTexts.join("\n\n").trim();
+}
+
+async function extractDocxText(file) {
+  setAnalysisStatus(`Reading ${file.name} as a Word document...`);
+  const mammoth = await loadScriptOnce("https://unpkg.com/mammoth@1.9.1/mammoth.browser.min.js", "mammoth");
+  const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
+  return result.value.trim();
+}
+
+async function extractUploadedGrantDocument(file) {
+  const lowerName = file.name.toLowerCase();
+  let text = "";
+
+  if (/\.(txt|md)$/i.test(file.name)) {
+    setAnalysisStatus(`Reading ${file.name}...`);
+    text = await file.text();
+  } else if (lowerName.endsWith(".pdf")) {
+    text = await extractPdfText(file);
+  } else if (lowerName.endsWith(".docx")) {
+    text = await extractDocxText(file);
+  } else {
+    throw new Error("This document type is not supported yet. Upload a PDF, DOCX, text, or Markdown file.");
+  }
+
+  if (wordCount(text) < 25) {
+    throw new Error(`${file.name} did not contain enough readable grant text for analysis.`);
+  }
+
+  state.grantDocumentName = file.name;
+  fields.grantText.value = text;
+  return text;
+}
+
+async function fetchGrantUrlText(url) {
+  const cleanUrl = url.trim();
+  if (!/^https?:\/\//i.test(cleanUrl)) {
+    throw new Error("Enter a full grant URL beginning with http:// or https://.");
+  }
+
+  setAnalysisStatus("Reading the grant URL...");
+
+  try {
+    const response = await fetch(cleanUrl);
+    if (response.ok) {
+      const directText = await response.text();
+      if (wordCount(directText) >= 25) return directText;
+    }
+  } catch {
+    // Many grant pages block direct browser fetches; the reader fallback below handles public pages.
+  }
+
+  const readerResponse = await fetch(`https://r.jina.ai/${cleanUrl}`);
+  if (!readerResponse.ok) {
+    throw new Error("The grant URL could not be read. Paste the call text or upload the grant document instead.");
+  }
+
+  const readerText = await readerResponse.text();
+  if (wordCount(readerText) < 25) {
+    throw new Error("The grant URL did not return enough readable text. Paste the call text or upload the grant document instead.");
+  }
+
+  return readerText;
+}
+
+async function prepareGrantSourceForAnalysis() {
+  if (wordCount(fields.grantText.value.trim()) >= 25) {
+    return "Grant text";
+  }
+
+  const file = fields.documentInput.files?.[0];
+  if (file) {
+    await extractUploadedGrantDocument(file);
+    return `Uploaded document: ${file.name}`;
+  }
+
+  if (fields.grantUrl.value.trim()) {
+    const text = await fetchGrantUrlText(fields.grantUrl.value);
+    fields.grantText.value = text;
+    state.grantDocumentName = "";
+    return "Grant URL";
+  }
+
+  throw new Error("Add a grant URL, paste grant text, or upload a grant document before analysis.");
+}
+
+async function runGrantAnalysis() {
+  const button = document.querySelector("#analyzeGrantButton");
+  button.disabled = true;
+  button.textContent = "Analyzing...";
+
+  try {
+    await prepareGrantSourceForAnalysis();
+    detectRequirements();
+  } catch (error) {
+    state.grantAnalysis = {
+      status: "needsText",
+      funderName: fields.funderName.value.trim() || "Not specified",
+      grantUrl: fields.grantUrl.value.trim(),
+      wordCount: wordCount(fields.grantText.value),
+      message: error.message,
+      nextSteps: [
+        "Use one intake source: paste grant text, upload a PDF/DOCX/text/Markdown file, or enter a public grant URL.",
+        "For private, login-protected, or blocked grant pages, paste the full call text into the Grant text box.",
+        "After the platform has readable text, click Analyze grant again.",
+      ],
+    };
+    renderGrantAnalysis();
+  } finally {
+    button.disabled = false;
+    button.textContent = "Analyze grant";
+    renderReadiness();
+  }
 }
 
 function splitSentences(text) {
@@ -1518,8 +1683,8 @@ document.querySelectorAll(".step").forEach((step) => {
 });
 
 document.querySelectorAll("[data-next]").forEach((button) => {
-  button.addEventListener("click", () => {
-    if (button.dataset.next === "requirements") detectRequirements();
+  button.addEventListener("click", async () => {
+    if (button.dataset.next === "requirements") await runGrantAnalysis();
     saveActiveDraft();
     switchPanel(button.dataset.next);
   });
@@ -1531,7 +1696,7 @@ document.querySelectorAll("[data-next]").forEach((button) => {
 
 fields.grantText.addEventListener("blur", detectRequirements);
 fields.sectionDraft.addEventListener("input", saveActiveDraft);
-document.querySelector("#analyzeGrantButton").addEventListener("click", detectRequirements);
+document.querySelector("#analyzeGrantButton").addEventListener("click", runGrantAnalysis);
 document.querySelector("#insertPromptButton").addEventListener("click", insertGuidePrompts);
 document.querySelector("#runReviewButton").addEventListener("click", runReview);
 document.querySelector("#exportButton").addEventListener("click", exportBrief);
@@ -1563,25 +1728,24 @@ document.querySelector("#saveRequirementButton").addEventListener("click", () =>
 fields.documentInput.addEventListener("change", async (event) => {
   const file = event.target.files[0];
   if (!file) return;
-  if (!/\.(txt|md)$/i.test(file.name)) {
-    fields.grantText.placeholder = "For this file type, paste extracted text here so the prototype can analyze it.";
+  try {
+    await extractUploadedGrantDocument(file);
+    detectRequirements();
+  } catch (error) {
     state.grantAnalysis = {
       status: "needsText",
       funderName: fields.funderName.value.trim() || "Not specified",
       grantUrl: fields.grantUrl.value.trim(),
       wordCount: wordCount(fields.grantText.value),
-      message: `${file.name} was selected, but this browser prototype cannot extract text from PDF or DOCX files yet. Paste the document text into the grant text box, then run analysis again.`,
+      message: error.message,
       nextSteps: [
-        "Open the PDF or DOCX and copy the call text.",
-        "Paste eligibility, purpose, budget, review criteria, required sections, restrictions, and deadline into the grant text box.",
-        "Click Analyze grant after the text appears in the box.",
+        "Upload a PDF, DOCX, text, or Markdown grant document.",
+        "If the document is protected or scanned, copy the grant text manually into the Grant text box.",
+        "Click Analyze grant after readable text appears.",
       ],
     };
     renderGrantAnalysis();
-    return;
   }
-  fields.grantText.value = await file.text();
-  detectRequirements();
 });
 
 renderSections();
