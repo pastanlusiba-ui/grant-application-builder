@@ -3,6 +3,7 @@ const state = {
   priorities: [],
   grantAnalysis: null,
   grantDocumentName: "",
+  guidePromptsOpen: {},
   currentProjectId: "",
   activeSection: "problem",
   sections: {
@@ -476,6 +477,7 @@ const fields = {
   activeSectionTitle: document.querySelector("#activeSectionTitle"),
   activeSectionGoal: document.querySelector("#activeSectionGoal"),
   sectionGuidance: document.querySelector("#sectionGuidance"),
+  insertedGuides: document.querySelector("#insertedGuides"),
   sectionDraft: document.querySelector("#sectionDraft"),
   problemRubric: document.querySelector("#problemRubric"),
   reviewFindings: document.querySelector("#reviewFindings"),
@@ -544,6 +546,7 @@ function serializeCurrentProject() {
     requirements: state.requirements,
     priorities: state.priorities,
     grantAnalysis: state.grantAnalysis,
+    guidePromptsOpen: state.guidePromptsOpen,
     sections: state.sections,
   };
 }
@@ -584,6 +587,7 @@ function loadProject(projectId) {
   state.requirements = project.requirements || [];
   state.priorities = project.priorities || [];
   state.grantAnalysis = project.grantAnalysis || null;
+  state.guidePromptsOpen = project.guidePromptsOpen || {};
   state.sections = { ...createBlankSections(), ...(project.sections || {}) };
 
   fields.projectName.value = project.fields?.projectName || project.name || "";
@@ -608,6 +612,7 @@ function startNewProject() {
   state.requirements = [];
   state.priorities = [];
   state.grantAnalysis = null;
+  state.guidePromptsOpen = {};
   state.activeSection = "problem";
   state.sections = createBlankSections();
 
@@ -1424,18 +1429,50 @@ function renderActiveSection() {
     <strong>${section.id === "problem" ? "Problem statement guidance built into this platform" : "Reviewer guidance built into this platform"}</strong>
     <ul>${section.prompts.map((prompt) => `<li>${escapeHtml(prompt)}</li>`).join("")}</ul>
   `;
+  renderInsertedGuidePrompts();
   renderSectionRubric();
+}
+
+function renderInsertedGuidePrompts() {
+  const section = sectionBlueprints.find((item) => item.id === state.activeSection);
+  const rubric = sectionRubrics[section.id];
+  const isOpen = Boolean(state.guidePromptsOpen[section.id]);
+
+  fields.insertedGuides.hidden = !isOpen;
+  document.querySelector("#insertPromptButton").textContent = isOpen ? "Hide guide prompts" : "Show guide prompts";
+
+  if (!isOpen) {
+    fields.insertedGuides.innerHTML = "";
+    return;
+  }
+
+  fields.insertedGuides.innerHTML = `
+    <div class="inserted-guides-header">
+      <strong>Guide prompts for ${escapeHtml(section.title)}</strong>
+      <span>Use these as reference. They are not part of your draft.</span>
+    </div>
+    <div class="guide-columns">
+      <div>
+        <strong>Writing prompts</strong>
+        <ul>${section.prompts.map((prompt) => `<li>${escapeHtml(prompt)}</li>`).join("")}</ul>
+      </div>
+      ${
+        rubric
+          ? `<div>
+              <strong>Reviewer rubric</strong>
+              <ul>${rubric.items.map((item) => `<li><b>${escapeHtml(item.label)}:</b> ${escapeHtml(item.guidance)}</li>`).join("")}</ul>
+            </div>`
+          : ""
+      }
+    </div>
+  `;
 }
 
 function insertGuidePrompts() {
   const section = sectionBlueprints.find((item) => item.id === state.activeSection);
-  const rubric = sectionRubrics[section.id];
-  const rubricText = rubric
-    ? `\n\nRequired reviewer-rubric elements (${rubric.source}):\n${rubric.items.map((item) => `- ${item.label}: ${item.guidance}`).join("\n")}`
-    : "";
-  const promptText = section.prompts.map((prompt) => `- ${prompt}`).join("\n");
-  fields.sectionDraft.value = `${fields.sectionDraft.value.trim()}\n\nGuiding notes:\n${promptText}${rubricText}\n`.trim();
-  saveActiveDraft();
+  state.guidePromptsOpen[section.id] = !state.guidePromptsOpen[section.id];
+  renderInsertedGuidePrompts();
+  renderReadiness();
 }
 
 function saveActiveDraft() {
