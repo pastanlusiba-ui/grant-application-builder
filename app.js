@@ -565,34 +565,95 @@ function textToEditorHtml(text) {
     .replace(/\n/g, "<br>");
 }
 
+function parseGuidedDraft(text) {
+  text = (text || "").trim();
+  if (!text || !text.includes("Guide prompt:")) return null;
+  const freeDraft = text
+    .split(/(?=Guide prompt:)/)[0]
+    .replace(/^Unguided draft:\s*/i, "")
+    .trim();
+  const promptBlocks = text.match(/Guide prompt:[\s\S]*?(?=\n\s*Guide prompt:|$)/g) || [];
+  const prompts = promptBlocks
+    .map((block) => {
+      const [, promptAndResponse = ""] = block.split("Guide prompt:");
+      const [prompt = "", response = ""] = promptAndResponse.split(/\n\s*Your draft:\s*\n?/i);
+      return {
+        prompt: prompt.trim(),
+        response: response.trim(),
+      };
+    })
+    .filter((item) => item.prompt);
+  return prompts.length ? { freeDraft, prompts } : null;
+}
+
+function parseLegacyGuideDraft(text) {
+  text = text || "";
+  const markerIndex = text.indexOf("Guiding notes:");
+  if (markerIndex < 0) return null;
+  const freeDraft = text.slice(0, markerIndex).trim();
+  const guideText = text.slice(markerIndex + "Guiding notes:".length);
+  const prompts = guideText
+    .split("\n")
+    .map((line) => line.replace(/^\s*-\s*/, "").trim())
+    .filter((line) => line && !/^Required reviewer-rubric elements/i.test(line))
+    .map((prompt) => ({ prompt, response: "" }));
+  return prompts.length ? { freeDraft, prompts } : null;
+}
+
+function renderGuidedEditor(guidedDraft) {
+  const freeDraftHtml = guidedDraft.freeDraft
+    ? `<div class="draft-text free-draft" contenteditable="true" data-placeholder="Continue any existing draft here.">${textToEditorHtml(guidedDraft.freeDraft)}</div>`
+    : "";
+  fields.sectionDraft.innerHTML = `
+    ${freeDraftHtml}
+    <div class="prompt-scaffold">
+      ${guidedDraft.prompts
+        .map(
+          (item, index) => `
+            <section class="prompt-response-group">
+              <div class="guide-prompt" contenteditable="false" data-prompt="${escapeHtml(item.prompt)}">
+                <span>Prompt ${index + 1}</span>
+                <p>${escapeHtml(item.prompt)}</p>
+              </div>
+              <div class="prompt-response" contenteditable="true" data-placeholder="Type your response under this prompt.">${textToEditorHtml(item.response)}</div>
+            </section>
+          `,
+        )
+        .join("")}
+    </div>
+  `;
+}
+
 function getSectionDraftText() {
+  const promptGroups = [...fields.sectionDraft.querySelectorAll(".prompt-response-group")];
+  if (promptGroups.length) {
+    const freeDraft = fields.sectionDraft.querySelector(".free-draft")?.innerText.trim() || "";
+    const guidedText = promptGroups
+      .map((group) => {
+        const prompt = group.querySelector(".guide-prompt")?.dataset.prompt || group.querySelector(".guide-prompt p")?.innerText || "";
+        const response = group.querySelector(".prompt-response")?.innerText.trim() || "";
+        return `Guide prompt: ${prompt.trim()}\nYour draft:\n${response}`;
+      })
+      .join("\n\n");
+    return `${freeDraft ? `Unguided draft:\n${freeDraft}\n\n` : ""}${guidedText}`.replace(/\u00a0/g, " ").trim();
+  }
+
   const draftPart = fields.sectionDraft.querySelector(".draft-text")?.innerText || fields.sectionDraft.innerText || "";
-  const guidePart = fields.sectionDraft.querySelector(".guide-note-block pre")?.innerText || "";
-  return `${draftPart.trim()}${guidePart.trim() ? `\n\n${guidePart.trim()}` : ""}`.replace(/\u00a0/g, " ").trim();
+  return draftPart.replace(/\u00a0/g, " ").trim();
 }
 
 function renderSectionEditor(text) {
   text = text || "";
-  const markerIndex = text.indexOf("Guiding notes:");
-  const draftText = markerIndex >= 0 ? text.slice(0, markerIndex).trim() : text.trim();
-  const guideText = markerIndex >= 0 ? text.slice(markerIndex).trim() : "";
+  const guidedDraft = parseGuidedDraft(text) || parseLegacyGuideDraft(text);
 
-  if (!draftText && !guideText) {
-    fields.sectionDraft.innerHTML = "";
+  if (guidedDraft) {
+    renderGuidedEditor(guidedDraft);
     return;
   }
 
-  fields.sectionDraft.innerHTML = `
-    ${
-      guideText
-        ? `<div class="guide-note-block" contenteditable="false">
-            <strong>Guide prompts</strong>
-            <pre>${escapeHtml(guideText)}</pre>
-          </div>`
-        : ""
-    }
-    <div class="draft-text">${draftText ? textToEditorHtml(draftText) : ""}</div>
-  `;
+  fields.sectionDraft.innerHTML = `<div class="draft-text" contenteditable="true" data-placeholder="${escapeHtml(
+    fields.sectionDraft.dataset.placeholder,
+  )}">${text.trim() ? textToEditorHtml(text.trim()) : ""}</div>`;
 }
 
 function saveCurrentProject() {
@@ -1456,10 +1517,8 @@ function renderActiveSection() {
   fields.activeSectionTitle.textContent = section.title;
   fields.activeSectionGoal.textContent = section.goal;
   renderSectionEditor(state.sections[section.id]);
-  fields.sectionGuidance.innerHTML = `
-    <strong>${section.id === "problem" ? "Problem statement guidance built into this platform" : "Reviewer guidance built into this platform"}</strong>
-    <ul>${section.prompts.map((prompt) => `<li>${escapeHtml(prompt)}</li>`).join("")}</ul>
-  `;
+  fields.sectionGuidance.hidden = true;
+  fields.sectionGuidance.innerHTML = "";
   renderSectionRubric();
 }
 
@@ -1467,11 +1526,13 @@ function insertGuidePrompts() {
   const section = sectionBlueprints.find((item) => item.id === state.activeSection);
   const rubric = sectionRubrics[section.id];
   const currentDraft = draftCoreText(getSectionDraftText()).trim();
-  const rubricText = rubric
-    ? `\n\nRequired reviewer-rubric elements (${rubric.source}):\n${rubric.items.map((item) => `- ${item.label}: ${item.guidance}`).join("\n")}`
-    : "";
-  const promptText = section.prompts.map((prompt) => `- ${prompt}`).join("\n");
-  state.sections[section.id] = `${currentDraft}\n\nGuiding notes:\n${promptText}${rubricText}`.trim();
+  const prompts = [
+    ...section.prompts,
+    ...(rubric ? rubric.items.map((item) => `${item.label}: ${item.guidance}`) : []),
+  ];
+  state.sections[section.id] = `${currentDraft ? `Unguided draft:\n${currentDraft}\n\n` : ""}${prompts
+    .map((prompt) => `Guide prompt: ${prompt}\nYour draft:\n`)
+    .join("\n\n")}`.trim();
   renderSectionEditor(state.sections[section.id]);
   renderReadiness();
 }
@@ -1647,6 +1708,18 @@ function wordCount(text) {
 }
 
 function draftCoreText(text) {
+  text = (text || "").trim();
+  if (!text) return "";
+  const guidedDraft = parseGuidedDraft(text);
+  if (guidedDraft) {
+    return [
+      guidedDraft.freeDraft,
+      ...guidedDraft.prompts.map((item) => item.response),
+    ]
+      .filter(Boolean)
+      .join("\n\n")
+      .trim();
+  }
   const markerIndex = text.indexOf("Guiding notes:");
   return (markerIndex >= 0 ? text.slice(0, markerIndex) : text).trim();
 }
