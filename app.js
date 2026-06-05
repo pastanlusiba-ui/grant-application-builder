@@ -1760,18 +1760,132 @@ function textToParagraphs(text) {
     .filter(Boolean);
 }
 
+function sentenceFromText(text) {
+  const sentence = cleanDraftParagraph(text);
+  if (!sentence) return "";
+  return /[.!?]$/.test(sentence) ? sentence : `${sentence}.`;
+}
+
+function sentenceGroup(items) {
+  return items.map(sentenceFromText).filter(Boolean).join(" ");
+}
+
+function paragraphWithFrame(frame, items, fallback = "") {
+  const body = sentenceGroup(items);
+  if (!body) return fallback;
+  return `${frame} ${body}`.replace(/\s+/g, " ").trim();
+}
+
+function guidedSourceForSection(section) {
+  const savedText = state.sections[section.id] || "";
+  const guidedDraft = parseGuidedDraft(savedText);
+  if (guidedDraft) {
+    return {
+      freeDraft: guidedDraft.freeDraft,
+      responses: guidedDraft.prompts.map((item) => item.response).filter((response) => wordCount(response) > 0),
+    };
+  }
+
+  const coreParagraphs = textToParagraphs(draftCoreText(savedText));
+  return { freeDraft: "", responses: coreParagraphs };
+}
+
+function synthesizeProblemStatement(responses, freeDraft) {
+  return [
+    paragraphWithFrame("The proposed work responds to a clearly defined problem that requires focused attention.", [freeDraft, ...responses.slice(0, 3)]),
+    paragraphWithFrame("The available evidence and contextual information show that the problem is not merely a general concern but a specific gap with real consequences.", responses.slice(3, 8)),
+    paragraphWithFrame("The proposal therefore concentrates on the underlying drivers, existing limitations, and significance of the issue so that the work is grounded in need rather than assumption.", responses.slice(8)),
+  ].filter(Boolean);
+}
+
+function synthesizeSolution(responses, freeDraft) {
+  return [
+    paragraphWithFrame("The proposed solution is designed as a direct and credible response to the problem described above.", [freeDraft, ...responses.slice(0, 2)]),
+    paragraphWithFrame("The approach is strengthened by its rationale, originality, and connection to available evidence or practice knowledge.", responses.slice(2, 4)),
+    paragraphWithFrame("Implementation is expected to be feasible because the proposal identifies the delivery assets, partnerships, and success signals needed to move from idea to execution.", responses.slice(4)),
+  ].filter(Boolean);
+}
+
+function synthesizeObjectives(responses, freeDraft) {
+  return [
+    paragraphWithFrame("The proposal translates the overall idea into a focused set of objectives that can guide implementation and review.", [freeDraft, ...responses.slice(0, 2)]),
+    paragraphWithFrame("These objectives are framed around measurable targets, defined outputs, and outcomes that can be assessed during the grant period.", responses.slice(2, 4)),
+    paragraphWithFrame("Together, the objectives create a practical results pathway that links the problem, the proposed activities, and the change the funder is being asked to support.", responses.slice(4)),
+  ].filter(Boolean);
+}
+
+function synthesizeMethods(responses, freeDraft) {
+  return [
+    paragraphWithFrame("The workplan is organized to move the project from preparation through delivery, learning, and completion in a coherent sequence.", [freeDraft, ...responses.slice(0, 2)]),
+    paragraphWithFrame("The methods are intended to be rigorous and feasible because they clarify responsibilities, timing, milestones, and delivery arrangements.", responses.slice(2, 4)),
+    paragraphWithFrame("The plan also anticipates implementation risks, ethical or quality issues, and mitigation steps so that reviewers can see how the project will be managed responsibly.", responses.slice(4)),
+  ].filter(Boolean);
+}
+
+function synthesizeImpact(responses, freeDraft) {
+  return [
+    paragraphWithFrame("The significance of this proposal lies in the value it can create for knowledge, practice, institutions, and the funder's mission.", [freeDraft, ...responses.slice(0, 2)]),
+    paragraphWithFrame("The expected benefits are grounded in a clear pathway from project activities to outputs, outcomes, and longer-term impact.", responses.slice(2, 5)),
+    paragraphWithFrame("By aligning the proposed work with funder priorities and stakeholder needs, the project makes a stronger case for why investment in this work is timely and worthwhile.", responses.slice(5)),
+  ].filter(Boolean);
+}
+
+function synthesizeEvaluation(responses, freeDraft) {
+  return [
+    paragraphWithFrame("The monitoring and evaluation plan is designed to generate credible evidence about whether the project is being implemented well and whether it is producing the intended results.", [freeDraft, ...responses.slice(0, 2)]),
+    paragraphWithFrame("The plan identifies the indicators, data sources, tools, collection responsibilities, and analysis methods that will support accountability and learning.", responses.slice(2, 4)),
+    paragraphWithFrame("Evaluation findings will be used to improve implementation, document outcomes, inform stakeholders, and support decisions after the grant period.", responses.slice(4)),
+  ].filter(Boolean);
+}
+
+function synthesizeBudget(responses, freeDraft) {
+  return [
+    paragraphWithFrame("The budget justification links requested resources to the activities, deliverables, and results described in the proposal.", [freeDraft, ...responses.slice(0, 2)]),
+    paragraphWithFrame("Each major cost should be understood as necessary for effective delivery, appropriate staffing, credible evaluation, or responsible project management.", responses.slice(2, 4)),
+    paragraphWithFrame("The proposed budget also demonstrates attention to value for money, funder rules, cost restrictions, matched contributions, and the resources required for successful implementation.", responses.slice(4)),
+  ].filter(Boolean);
+}
+
+function synthesizeSustainability(responses, freeDraft) {
+  return [
+    paragraphWithFrame("The sustainability strategy explains what will remain after the grant and how the benefits of the work can continue beyond the funded period.", [freeDraft, ...responses.slice(0, 2)]),
+    paragraphWithFrame("The proposal identifies the systems, relationships, resources, governance arrangements, or institutional commitments needed to maintain the work.", responses.slice(2, 4)),
+    paragraphWithFrame("It also sets out a realistic pathway for adaptation, replication, integration, or scale so that learning and assets generated by the project remain useful over time.", responses.slice(4)),
+  ].filter(Boolean);
+}
+
+const proposalSectionSynthesizers = {
+  problem: synthesizeProblemStatement,
+  solution: synthesizeSolution,
+  objectives: synthesizeObjectives,
+  methods: synthesizeMethods,
+  impact: synthesizeImpact,
+  evaluation: synthesizeEvaluation,
+  budget: synthesizeBudget,
+  sustainability: synthesizeSustainability,
+};
+
 function sectionParagraphs(section) {
-  const coreText = draftCoreText(state.sections[section.id]);
-  const paragraphs = textToParagraphs(coreText);
-  return paragraphs.length ? paragraphs : ["Not drafted yet."];
+  const { freeDraft, responses } = guidedSourceForSection(section);
+  if (!freeDraft && !responses.length) return ["This section has not been drafted yet."];
+
+  const synthesizer = proposalSectionSynthesizers[section.id];
+  const paragraphs = synthesizer ? synthesizer(responses, freeDraft) : textToParagraphs(draftCoreText(state.sections[section.id]));
+  return paragraphs.length ? paragraphs : ["This section needs more source material before the platform can draft it into proposal prose."];
 }
 
 function composedProposalDraft() {
   saveActiveDraft();
   const title = fields.projectTitle.value.trim() || currentProjectName();
   const overview = textToParagraphs(fields.ideaText.value);
+  const projectOverview = overview.length
+    ? [
+        paragraphWithFrame("This proposal presents a focused project concept for funder consideration.", overview.slice(0, 2)),
+        paragraphWithFrame("The work is positioned around the problem, proposed response, intended beneficiaries, and expected contribution described by the applicant.", overview.slice(2)),
+      ].filter(Boolean)
+    : [];
   const sections = [
-    ...(overview.length ? [{ title: "Project overview", paragraphs: overview }] : []),
+    ...(projectOverview.length ? [{ title: "Project overview", paragraphs: projectOverview }] : []),
     ...sectionBlueprints.map((section) => ({
       title: section.title,
       paragraphs: sectionParagraphs(section),
