@@ -774,6 +774,12 @@ textarea {
   gap: 18px;
 }
 
+.review-actions {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+}
+
 .scoreboard {
   display: grid;
   gap: 10px;
@@ -856,6 +862,7 @@ dialog {
   .topbar,
   .panel-heading,
   .writer-header,
+  .review-actions,
   .project-actions {
     align-items: stretch;
     flex-direction: column;

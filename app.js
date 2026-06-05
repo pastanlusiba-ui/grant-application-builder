@@ -479,6 +479,7 @@ const fields = {
   sectionDraft: document.querySelector("#sectionDraft"),
   problemRubric: document.querySelector("#problemRubric"),
   reviewFindings: document.querySelector("#reviewFindings"),
+  downloadProposalButton: document.querySelector("#downloadProposalButton"),
   projectSelect: document.querySelector("#projectSelect"),
   saveProjectButton: document.querySelector("#saveProjectButton"),
   newProjectButton: document.querySelector("#newProjectButton"),
@@ -1733,6 +1734,266 @@ function escapeHtml(value) {
     .replaceAll("'", "&#039;");
 }
 
+function escapeXml(value) {
+  return String(value || "")
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&apos;");
+}
+
+function cleanDraftParagraph(block) {
+  return block
+    .split("\n")
+    .map((line) => line.replace(/^\s*(?:[-*]|\u2022)\s*/, "").trim())
+    .filter(Boolean)
+    .join(" ")
+    .replace(/\s+/g, " ")
+    .trim();
+}
+
+function textToParagraphs(text) {
+  return (text || "")
+    .split(/\n{2,}/)
+    .map(cleanDraftParagraph)
+    .filter(Boolean);
+}
+
+function sectionParagraphs(section) {
+  const coreText = draftCoreText(state.sections[section.id]);
+  const paragraphs = textToParagraphs(coreText);
+  return paragraphs.length ? paragraphs : ["Not drafted yet."];
+}
+
+function composedProposalDraft() {
+  saveActiveDraft();
+  const title = fields.projectTitle.value.trim() || currentProjectName();
+  const overview = textToParagraphs(fields.ideaText.value);
+  const sections = [
+    ...(overview.length ? [{ title: "Project overview", paragraphs: overview }] : []),
+    ...sectionBlueprints.map((section) => ({
+      title: section.title,
+      paragraphs: sectionParagraphs(section),
+    })),
+  ];
+
+  return {
+    title,
+    funder: fields.funderName.value.trim(),
+    projectName: currentProjectName(),
+    sections,
+  };
+}
+
+function wordParagraph(text, style = "") {
+  const textRuns = String(text || "")
+    .split("\n")
+    .map((part, index) => `${index ? "<w:br/>" : ""}<w:t xml:space="preserve">${escapeXml(part)}</w:t>`)
+    .join("");
+  const styleXml = style ? `<w:pPr><w:pStyle w:val="${style}"/></w:pPr>` : "";
+  return `<w:p>${styleXml}<w:r>${textRuns}</w:r></w:p>`;
+}
+
+function documentXmlFromDraft(draft) {
+  const body = [
+    wordParagraph(draft.title, "Title"),
+    ...(draft.funder ? [wordParagraph(`Funder: ${draft.funder}`)] : []),
+    wordParagraph(`Project: ${draft.projectName}`),
+    ...draft.sections.flatMap((section) => [
+      wordParagraph(section.title, "Heading1"),
+      ...section.paragraphs.map((paragraph) => wordParagraph(paragraph)),
+    ]),
+    '<w:sectPr><w:pgSz w:w="12240" w:h="15840"/><w:pgMar w:top="1440" w:right="1440" w:bottom="1440" w:left="1440" w:header="720" w:footer="720" w:gutter="0"/></w:sectPr>',
+  ].join("");
+
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:document xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main" xmlns:r="http://schemas.openxmlformats.org/officeDocument/2006/relationships">
+  <w:body>${body}</w:body>
+</w:document>`;
+}
+
+function docxStylesXml() {
+  return `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<w:styles xmlns:w="http://schemas.openxmlformats.org/wordprocessingml/2006/main">
+  <w:style w:type="paragraph" w:default="1" w:styleId="Normal">
+    <w:name w:val="Normal"/>
+    <w:qFormat/>
+    <w:pPr><w:spacing w:after="160" w:line="276" w:lineRule="auto"/></w:pPr>
+    <w:rPr><w:rFonts w:ascii="Aptos" w:hAnsi="Aptos"/><w:sz w:val="22"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Title">
+    <w:name w:val="Title"/>
+    <w:basedOn w:val="Normal"/>
+    <w:qFormat/>
+    <w:pPr><w:spacing w:after="260"/></w:pPr>
+    <w:rPr><w:b/><w:sz w:val="36"/></w:rPr>
+  </w:style>
+  <w:style w:type="paragraph" w:styleId="Heading1">
+    <w:name w:val="heading 1"/>
+    <w:basedOn w:val="Normal"/>
+    <w:next w:val="Normal"/>
+    <w:qFormat/>
+    <w:pPr><w:spacing w:before="360" w:after="140"/></w:pPr>
+    <w:rPr><w:b/><w:sz w:val="28"/></w:rPr>
+  </w:style>
+</w:styles>`;
+}
+
+const crcTable = Array.from({ length: 256 }, (_, index) => {
+  let value = index;
+  for (let bit = 0; bit < 8; bit += 1) {
+    value = value & 1 ? 0xedb88320 ^ (value >>> 1) : value >>> 1;
+  }
+  return value >>> 0;
+});
+
+function crc32(bytes) {
+  let crc = 0xffffffff;
+  bytes.forEach((byte) => {
+    crc = crcTable[(crc ^ byte) & 0xff] ^ (crc >>> 8);
+  });
+  return (crc ^ 0xffffffff) >>> 0;
+}
+
+function writeUint16(view, offset, value) {
+  view.setUint16(offset, value, true);
+}
+
+function writeUint32(view, offset, value) {
+  view.setUint32(offset, value >>> 0, true);
+}
+
+function dosTimestamp(date = new Date()) {
+  const time = (date.getHours() << 11) | (date.getMinutes() << 5) | Math.floor(date.getSeconds() / 2);
+  const dosDate = ((date.getFullYear() - 1980) << 9) | ((date.getMonth() + 1) << 5) | date.getDate();
+  return { time, date: dosDate };
+}
+
+function concatBytes(chunks) {
+  const total = chunks.reduce((size, chunk) => size + chunk.length, 0);
+  const output = new Uint8Array(total);
+  let offset = 0;
+  chunks.forEach((chunk) => {
+    output.set(chunk, offset);
+    offset += chunk.length;
+  });
+  return output;
+}
+
+function createZip(files) {
+  const encoder = new TextEncoder();
+  const stamp = dosTimestamp();
+  const localParts = [];
+  const centralParts = [];
+  let offset = 0;
+
+  files.forEach((file) => {
+    const nameBytes = encoder.encode(file.name);
+    const dataBytes = encoder.encode(file.content);
+    const checksum = crc32(dataBytes);
+
+    const localHeader = new Uint8Array(30 + nameBytes.length);
+    const localView = new DataView(localHeader.buffer);
+    writeUint32(localView, 0, 0x04034b50);
+    writeUint16(localView, 4, 20);
+    writeUint16(localView, 6, 0);
+    writeUint16(localView, 8, 0);
+    writeUint16(localView, 10, stamp.time);
+    writeUint16(localView, 12, stamp.date);
+    writeUint32(localView, 14, checksum);
+    writeUint32(localView, 18, dataBytes.length);
+    writeUint32(localView, 22, dataBytes.length);
+    writeUint16(localView, 26, nameBytes.length);
+    writeUint16(localView, 28, 0);
+    localHeader.set(nameBytes, 30);
+
+    localParts.push(localHeader, dataBytes);
+
+    const centralHeader = new Uint8Array(46 + nameBytes.length);
+    const centralView = new DataView(centralHeader.buffer);
+    writeUint32(centralView, 0, 0x02014b50);
+    writeUint16(centralView, 4, 20);
+    writeUint16(centralView, 6, 20);
+    writeUint16(centralView, 8, 0);
+    writeUint16(centralView, 10, 0);
+    writeUint16(centralView, 12, stamp.time);
+    writeUint16(centralView, 14, stamp.date);
+    writeUint32(centralView, 16, checksum);
+    writeUint32(centralView, 20, dataBytes.length);
+    writeUint32(centralView, 24, dataBytes.length);
+    writeUint16(centralView, 28, nameBytes.length);
+    writeUint16(centralView, 30, 0);
+    writeUint16(centralView, 32, 0);
+    writeUint16(centralView, 34, 0);
+    writeUint16(centralView, 36, 0);
+    writeUint32(centralView, 38, 0);
+    writeUint32(centralView, 42, offset);
+    centralHeader.set(nameBytes, 46);
+    centralParts.push(centralHeader);
+
+    offset += localHeader.length + dataBytes.length;
+  });
+
+  const centralDirectory = concatBytes(centralParts);
+  const endRecord = new Uint8Array(22);
+  const endView = new DataView(endRecord.buffer);
+  writeUint32(endView, 0, 0x06054b50);
+  writeUint16(endView, 4, 0);
+  writeUint16(endView, 6, 0);
+  writeUint16(endView, 8, files.length);
+  writeUint16(endView, 10, files.length);
+  writeUint32(endView, 12, centralDirectory.length);
+  writeUint32(endView, 16, offset);
+  writeUint16(endView, 20, 0);
+
+  return concatBytes([...localParts, centralDirectory, endRecord]);
+}
+
+function createDocxBlob(draft) {
+  const files = [
+    {
+      name: "[Content_Types].xml",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
+  <Default Extension="rels" ContentType="application/vnd.openxmlformats-package.relationships+xml"/>
+  <Default Extension="xml" ContentType="application/xml"/>
+  <Override PartName="/word/document.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.document.main+xml"/>
+  <Override PartName="/word/styles.xml" ContentType="application/vnd.openxmlformats-officedocument.wordprocessingml.styles+xml"/>
+</Types>`,
+    },
+    {
+      name: "_rels/.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/officeDocument" Target="word/document.xml"/>
+</Relationships>`,
+    },
+    {
+      name: "word/_rels/document.xml.rels",
+      content: `<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<Relationships xmlns="http://schemas.openxmlformats.org/package/2006/relationships">
+  <Relationship Id="rId1" Type="http://schemas.openxmlformats.org/officeDocument/2006/relationships/styles" Target="styles.xml"/>
+</Relationships>`,
+    },
+    { name: "word/document.xml", content: documentXmlFromDraft(draft) },
+    { name: "word/styles.xml", content: docxStylesXml() },
+  ];
+
+  return new Blob([createZip(files)], { type: "application/vnd.openxmlformats-officedocument.wordprocessingml.document" });
+}
+
+function downloadProposalDraft() {
+  const draft = composedProposalDraft();
+  const blob = createDocxBlob(draft);
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = `${currentProjectName().replace(/[^\w]+/g, "-").replace(/^-|-$/g, "") || "proposal-draft"}.docx`;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function grantAnalysisExportLines(analysis) {
   if (!analysis) return [];
   return [
@@ -1777,7 +2038,7 @@ function exportBrief() {
     "",
     ...grantAnalysisExportLines(state.grantAnalysis),
     "## Proposal Sections",
-    ...sectionBlueprints.flatMap((section) => [`### ${section.title}`, state.sections[section.id] || "Not drafted yet.", ""]),
+    ...sectionBlueprints.flatMap((section) => [`### ${section.title}`, draftCoreText(state.sections[section.id]) || "Not drafted yet.", ""]),
   ];
 
   const blob = new Blob([lines.join("\n")], { type: "text/markdown" });
@@ -1811,6 +2072,7 @@ document.querySelector("#analyzeGrantButton").addEventListener("click", runGrant
 document.querySelector("#insertPromptButton").addEventListener("click", insertGuidePrompts);
 document.querySelector("#runReviewButton").addEventListener("click", runReview);
 document.querySelector("#exportButton").addEventListener("click", exportBrief);
+fields.downloadProposalButton.addEventListener("click", downloadProposalDraft);
 fields.saveProjectButton.addEventListener("click", saveCurrentProject);
 fields.newProjectButton.addEventListener("click", startNewProject);
 fields.projectSelect.addEventListener("change", (event) => {
