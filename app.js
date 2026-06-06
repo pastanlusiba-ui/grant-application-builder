@@ -3,6 +3,9 @@ const state = {
   priorities: [],
   grantAnalysis: null,
   grantDocumentName: "",
+  literature: [],
+  pendingLiteratureFiles: [],
+  aiDrafts: {},
   currentProjectId: "",
   activeSection: "problem",
   sections: {
@@ -479,6 +482,15 @@ const fields = {
   sectionDraft: document.querySelector("#sectionDraft"),
   problemRubric: document.querySelector("#problemRubric"),
   sectionDraftAssistant: document.querySelector("#sectionDraftAssistant"),
+  literatureInput: document.querySelector("#literatureInput"),
+  addLiteratureButton: document.querySelector("#addLiteratureButton"),
+  literatureStatus: document.querySelector("#literatureStatus"),
+  literatureList: document.querySelector("#literatureList"),
+  analyzeLiteratureButton: document.querySelector("#analyzeLiteratureButton"),
+  geminiApiKey: document.querySelector("#geminiApiKey"),
+  geminiModel: document.querySelector("#geminiModel"),
+  saveGeminiKeyButton: document.querySelector("#saveGeminiKeyButton"),
+  aiStatus: document.querySelector("#aiStatus"),
   reviewFindings: document.querySelector("#reviewFindings"),
   downloadProposalButton: document.querySelector("#downloadProposalButton"),
   projectSelect: document.querySelector("#projectSelect"),
@@ -488,6 +500,8 @@ const fields = {
 };
 
 const projectStorageKey = "grantcraft.projects.v1";
+const geminiApiKeyStorageKey = "grantcraft.geminiApiKey.v1";
+const geminiModelStorageKey = "grantcraft.geminiModel.v1";
 
 function switchPanel(panelId) {
   document.querySelectorAll(".panel").forEach((panel) => panel.classList.toggle("is-visible", panel.id === panelId));
@@ -534,7 +548,7 @@ function serializeCurrentProject() {
     updatedAt: now,
     createdAt: now,
     activeSection: state.activeSection,
-  fields: {
+    fields: {
       projectName: fields.projectName.value,
       projectTitle: fields.projectTitle.value,
       funderName: fields.funderName.value,
@@ -546,6 +560,8 @@ function serializeCurrentProject() {
     requirements: state.requirements,
     priorities: state.priorities,
     grantAnalysis: state.grantAnalysis,
+    literature: state.literature,
+    aiDrafts: state.aiDrafts,
     sections: state.sections,
   };
 }
@@ -683,6 +699,9 @@ function loadProject(projectId) {
   state.requirements = project.requirements || [];
   state.priorities = project.priorities || [];
   state.grantAnalysis = project.grantAnalysis || null;
+  state.literature = project.literature || [];
+  state.pendingLiteratureFiles = [];
+  state.aiDrafts = project.aiDrafts || {};
   state.sections = { ...createBlankSections(), ...(project.sections || {}) };
 
   fields.projectName.value = project.fields?.projectName || project.name || "";
@@ -696,6 +715,7 @@ function loadProject(projectId) {
   renderProjectSelect();
   renderRequirements();
   renderGrantAnalysis();
+  renderLiterature();
   renderSections();
   renderActiveSection();
   renderReadiness();
@@ -707,6 +727,9 @@ function startNewProject() {
   state.requirements = [];
   state.priorities = [];
   state.grantAnalysis = null;
+  state.literature = [];
+  state.pendingLiteratureFiles = [];
+  state.aiDrafts = {};
   state.activeSection = "problem";
   state.sections = createBlankSections();
 
@@ -716,12 +739,14 @@ function startNewProject() {
   fields.ideaText.value = "";
   fields.grantUrl.value = "";
   fields.grantText.value = "";
+  if (fields.literatureInput) fields.literatureInput.value = "";
   renderSectionEditor("");
   state.grantDocumentName = "";
 
   renderProjectSelect();
   renderRequirements();
   renderGrantAnalysis();
+  renderLiterature();
   renderSections();
   renderActiveSection();
   renderReadiness();
@@ -797,8 +822,75 @@ function loadScriptOnce(src, globalName) {
   });
 }
 
-async function extractPdfText(file) {
-  setAnalysisStatus(`Reading ${file.name} as a PDF...`);
+function setAiStatus(message) {
+  if (fields.aiStatus) fields.aiStatus.textContent = message;
+}
+
+function getGeminiApiKey() {
+  return fields.geminiApiKey?.value.trim() || localStorage.getItem(geminiApiKeyStorageKey) || "";
+}
+
+function getGeminiModel() {
+  return fields.geminiModel?.value || localStorage.getItem(geminiModelStorageKey) || "gemini-2.5-flash";
+}
+
+function saveGeminiSettings() {
+  const apiKey = fields.geminiApiKey.value.trim();
+  if (apiKey) localStorage.setItem(geminiApiKeyStorageKey, apiKey);
+  localStorage.setItem(geminiModelStorageKey, fields.geminiModel.value);
+  setAiStatus(apiKey ? "AI connected" : "AI key needed");
+}
+
+function loadGeminiSettings() {
+  const savedKey = localStorage.getItem(geminiApiKeyStorageKey) || "";
+  const savedModel = localStorage.getItem(geminiModelStorageKey) || "gemini-2.5-flash";
+  fields.geminiApiKey.value = savedKey;
+  fields.geminiModel.value = savedModel;
+  setAiStatus(savedKey ? "AI connected" : "AI not connected");
+}
+
+function extractJsonFromText(text) {
+  const cleaned = text
+    .trim()
+    .replace(/^```(?:json)?/i, "")
+    .replace(/```$/i, "")
+    .trim();
+  const start = cleaned.indexOf("{");
+  const end = cleaned.lastIndexOf("}");
+  if (start >= 0 && end > start) return JSON.parse(cleaned.slice(start, end + 1));
+  return JSON.parse(cleaned);
+}
+
+async function callGemini(prompt, { expectJson = false } = {}) {
+  const apiKey = getGeminiApiKey();
+  if (!apiKey) throw new Error("Add and save your Gemini API key before using AI drafting.");
+
+  const model = getGeminiModel();
+  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "x-goog-api-key": apiKey,
+    },
+    body: JSON.stringify({
+      contents: [{ parts: [{ text: prompt }] }],
+      generationConfig: expectJson ? { responseMimeType: "application/json" } : undefined,
+    }),
+  });
+
+  if (!response.ok) {
+    const errorText = await response.text();
+    throw new Error(`Gemini request failed: ${errorText.slice(0, 240)}`);
+  }
+
+  const result = await response.json();
+  const text = result.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("\n").trim();
+  if (!text) throw new Error("Gemini did not return usable text.");
+  return expectJson ? extractJsonFromText(text) : text;
+}
+
+async function extractPdfText(file, statusCallback = setAnalysisStatus) {
+  statusCallback(`Reading ${file.name} as a PDF...`);
   const pdfjs = await import("https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.mjs");
   pdfjs.GlobalWorkerOptions.workerSrc = "https://unpkg.com/pdfjs-dist@4.10.38/build/pdf.worker.mjs";
   const pdf = await pdfjs.getDocument({ data: await file.arrayBuffer() }).promise;
@@ -813,27 +905,28 @@ async function extractPdfText(file) {
   return pageTexts.join("\n\n").trim();
 }
 
-async function extractDocxText(file) {
-  setAnalysisStatus(`Reading ${file.name} as a Word document...`);
+async function extractDocxText(file, statusCallback = setAnalysisStatus) {
+  statusCallback(`Reading ${file.name} as a Word document...`);
   const mammoth = await loadScriptOnce("https://unpkg.com/mammoth@1.9.1/mammoth.browser.min.js", "mammoth");
   const result = await mammoth.extractRawText({ arrayBuffer: await file.arrayBuffer() });
   return result.value.trim();
 }
 
-async function extractUploadedGrantDocument(file) {
+async function extractDocumentText(file, statusCallback = setAnalysisStatus) {
   const lowerName = file.name.toLowerCase();
-  let text = "";
 
   if (/\.(txt|md)$/i.test(file.name)) {
-    setAnalysisStatus(`Reading ${file.name}...`);
-    text = await file.text();
-  } else if (lowerName.endsWith(".pdf")) {
-    text = await extractPdfText(file);
-  } else if (lowerName.endsWith(".docx")) {
-    text = await extractDocxText(file);
-  } else {
-    throw new Error("This document type is not supported yet. Upload a PDF, DOCX, text, or Markdown file.");
+    statusCallback(`Reading ${file.name}...`);
+    return file.text();
   }
+
+  if (lowerName.endsWith(".pdf")) return extractPdfText(file, statusCallback);
+  if (lowerName.endsWith(".docx")) return extractDocxText(file, statusCallback);
+  throw new Error("This document type is not supported yet. Upload a PDF, DOCX, text, or Markdown file.");
+}
+
+async function extractUploadedGrantDocument(file) {
+  const text = await extractDocumentText(file);
 
   if (wordCount(text) < 25) {
     throw new Error(`${file.name} did not contain enough readable grant text for analysis.`);
@@ -842,6 +935,174 @@ async function extractUploadedGrantDocument(file) {
   state.grantDocumentName = file.name;
   fields.grantText.value = text;
   return text;
+}
+
+function literatureSectionMap(sectionName) {
+  const lower = sectionName.toLowerCase();
+  if (/background|problem/.test(lower)) return "problem";
+  if (/justification|significance|forward|use|impact/.test(lower)) return "impact";
+  if (/method|workplan|approach|design/.test(lower)) return "methods";
+  if (/evaluation|monitoring|indicator|measure/.test(lower)) return "evaluation";
+  if (/objective|question/.test(lower)) return "objectives";
+  return "";
+}
+
+function fileQueueKey(file) {
+  return `${file.name}-${file.size}-${file.lastModified}`;
+}
+
+function queueLiteratureFiles(files) {
+  const existing = new Set(state.pendingLiteratureFiles.map(fileQueueKey));
+  const analyzed = new Set(state.literature.map((item) => item.sourceKey).filter(Boolean));
+  files.forEach((file) => {
+    const key = fileQueueKey(file);
+    if (!existing.has(key) && !analyzed.has(key)) {
+      state.pendingLiteratureFiles.push(file);
+      existing.add(key);
+    }
+  });
+  renderLiterature();
+}
+
+function renderLiterature() {
+  const count = state.literature.length;
+  const pendingCount = state.pendingLiteratureFiles.length;
+  if (fields.literatureStatus) {
+    fields.literatureStatus.textContent =
+      count || pendingCount
+        ? `${count} analyzed, ${pendingCount} queued for AI analysis.`
+        : "No papers attached yet.";
+  }
+  if (!fields.literatureList) return;
+  const pendingCards = state.pendingLiteratureFiles
+    .map(
+      (file) => `
+        <article class="literature-card is-pending">
+          <strong>${escapeHtml(file.name)}</strong>
+          <p>Queued for AI analysis. This attachment will stay queued while you add more papers.</p>
+        </article>
+      `,
+    )
+    .join("");
+  const analyzedCards = state.literature.length
+    ? state.literature
+        .map(
+          (item) => `
+            <article class="literature-card">
+              <strong>${escapeHtml(item.name)}</strong>
+              <p>${escapeHtml(item.summary || "Literature summary pending.")}</p>
+              ${
+                item.keyFindings?.length
+                  ? `<ul>${item.keyFindings.slice(0, 4).map((finding) => `<li>${escapeHtml(finding)}</li>`).join("")}</ul>`
+                  : ""
+              }
+            </article>
+          `,
+        )
+        .join("")
+    : "";
+  fields.literatureList.innerHTML = `${pendingCards}${analyzedCards}`;
+}
+
+function literatureEvidenceFor(target) {
+  return state.literature.flatMap((paper) => {
+    const contributions = paper.sectionContributions || {};
+    return Object.entries(contributions)
+      .filter(([sectionName]) => sectionName.toLowerCase().includes(target.toLowerCase()))
+      .flatMap(([, items]) => items || [])
+      .map((item) => `${item} (${paper.name})`);
+  });
+}
+
+function appendLiteratureEvidenceToSections(literatureItem) {
+  Object.entries(literatureItem.sectionContributions || {}).forEach(([sectionName, items]) => {
+    const sectionId = literatureSectionMap(sectionName);
+    if (!sectionId || !items?.length) return;
+    const addition = `Literature-informed notes from ${literatureItem.name}:\n${items.map((item) => `- ${item}`).join("\n")}`;
+    if (!state.sections[sectionId]?.includes(addition)) {
+      state.sections[sectionId] = `${state.sections[sectionId] ? `${state.sections[sectionId]}\n\n` : ""}${addition}`.trim();
+    }
+  });
+}
+
+function literatureAnalysisPrompt(fileName, text) {
+  const context = proposalContext();
+  return `You are an expert grant proposal writing assistant. Read the attached paper text and extract only information useful for developing a competitive grant proposal.
+
+Project title: ${context.title}
+Funder: ${context.funder}
+Project idea: ${fields.ideaText.value.trim() || "Not provided yet"}
+Funder priorities: ${context.priorities.join("; ") || "Not detected yet"}
+
+Return strict JSON with this shape:
+{
+  "summary": "2-3 sentence summary of the paper's relevance to the proposal",
+  "keyFindings": ["finding useful for proposal writing"],
+  "sectionContributions": {
+    "Background": ["evidence/background text to use"],
+    "Problem statement": ["problem evidence to use"],
+    "Justification/Significance of study": ["significance, gap, forward-use, policy/practice/research value"],
+    "Research questions": ["possible research question contribution"],
+    "Objectives": ["possible objective contribution"],
+    "Workplan and methods": ["method/design/implementation contribution"],
+    "Monitoring and evaluation": ["indicator/evaluation/data contribution"]
+  },
+  "citationNote": "short citation note using only details visible in the text"
+}
+
+Do not invent statistics, authors, dates, or citations. If a detail is not visible, say that it is not visible.
+
+Paper filename: ${fileName}
+Paper text:
+${text.slice(0, 42000)}`;
+}
+
+async function analyzeLiteratureAttachments() {
+  const files = [...state.pendingLiteratureFiles];
+  if (!files.length) {
+    setAiStatus("Attach papers first");
+    return;
+  }
+
+  fields.analyzeLiteratureButton.disabled = true;
+  fields.analyzeLiteratureButton.textContent = "Analyzing...";
+  try {
+    for (const file of files) {
+      setAiStatus(`Reading ${file.name}`);
+      const text = await extractDocumentText(file, (message) => {
+        if (fields.literatureStatus) fields.literatureStatus.textContent = message;
+      });
+      if (wordCount(text) < 50) throw new Error(`${file.name} does not contain enough readable text.`);
+
+      setAiStatus(`Gemini reading ${file.name}`);
+      const analysis = await callGemini(literatureAnalysisPrompt(file.name, text), { expectJson: true });
+      const literatureItem = {
+        id: `paper-${Date.now()}-${Math.random().toString(16).slice(2)}`,
+        name: file.name,
+        sourceKey: fileQueueKey(file),
+        wordCount: wordCount(text),
+        summary: analysis.summary || "",
+        keyFindings: analysis.keyFindings || [],
+        sectionContributions: analysis.sectionContributions || {},
+        citationNote: analysis.citationNote || "",
+      };
+      state.literature.push(literatureItem);
+      state.pendingLiteratureFiles = state.pendingLiteratureFiles.filter((item) => fileQueueKey(item) !== fileQueueKey(file));
+      appendLiteratureEvidenceToSections(literatureItem);
+      renderLiterature();
+    }
+    setAiStatus("Literature integrated");
+    renderLiterature();
+    renderSections();
+    renderActiveSection();
+    renderReadiness();
+  } catch (error) {
+    setAiStatus("AI analysis failed");
+    if (fields.literatureStatus) fields.literatureStatus.textContent = error.message;
+  } finally {
+    fields.analyzeLiteratureButton.disabled = false;
+    fields.analyzeLiteratureButton.textContent = "Analyze literature";
+  }
 }
 
 async function fetchGrantUrlText(url) {
@@ -1798,6 +2059,14 @@ function proposalContext() {
     requirements: uniqueItems(state.requirements.map((requirement) => requirement.text)),
     grantMission: uniqueItems(analysis.mission || []),
     strategicMoves: uniqueItems(analysis.strategicMoves || []),
+    literatureFindings: uniqueItems(state.literature.flatMap((paper) => paper.keyFindings || [])),
+    literatureBackground: literatureEvidenceFor("Background"),
+    literatureProblem: literatureEvidenceFor("Problem statement"),
+    literatureJustification: literatureEvidenceFor("Justification"),
+    literatureQuestions: literatureEvidenceFor("Research questions"),
+    literatureObjectives: literatureEvidenceFor("Objectives"),
+    literatureMethods: literatureEvidenceFor("Workplan"),
+    literatureEvaluation: literatureEvidenceFor("Monitoring"),
   };
 }
 
@@ -1838,7 +2107,7 @@ function guidedPromptResponses(sectionId) {
 
 function sectionSourceText(sectionId) {
   const section = sectionBlueprints.find((item) => item.id === sectionId);
-  return section ? draftCoreText(state.sections[section.id]) : "";
+  return section ? state.aiDrafts[section.id] || draftCoreText(state.sections[section.id]) : "";
 }
 
 function responseForPrompt(sectionId, patterns) {
@@ -1877,8 +2146,9 @@ function synthesizeObjectives(responses, freeDraft) {
 }
 
 function synthesizeMethods(responses, freeDraft) {
+  const context = proposalContext();
   return [
-    paragraphWithFrame("The workplan is organized to move the project from preparation through delivery, learning, and completion in a coherent sequence.", [freeDraft, ...responses.slice(0, 2)]),
+    paragraphWithFrame("The workplan is organized to move the project from preparation through delivery, learning, and completion in a coherent sequence.", [freeDraft, ...responses.slice(0, 2), ...context.literatureMethods.slice(0, 2)]),
     paragraphWithFrame("The methods are intended to be rigorous and feasible because they clarify responsibilities, timing, milestones, and delivery arrangements.", responses.slice(2, 4)),
     paragraphWithFrame("The plan also anticipates implementation risks, ethical or quality issues, and mitigation steps so that reviewers can see how the project will be managed responsibly.", responses.slice(4)),
   ].filter(Boolean);
@@ -1893,9 +2163,10 @@ function synthesizeImpact(responses, freeDraft) {
 }
 
 function synthesizeEvaluation(responses, freeDraft) {
+  const context = proposalContext();
   return [
     paragraphWithFrame("The monitoring and evaluation plan is designed to generate credible evidence about whether the project is being implemented well and whether it is producing the intended results.", [freeDraft, ...responses.slice(0, 2)]),
-    paragraphWithFrame("The plan identifies the indicators, data sources, tools, collection responsibilities, and analysis methods that will support accountability and learning.", responses.slice(2, 4)),
+    paragraphWithFrame("The plan identifies the indicators, data sources, tools, collection responsibilities, and analysis methods that will support accountability and learning.", [...responses.slice(2, 4), ...context.literatureEvaluation.slice(0, 2)]),
     paragraphWithFrame("Evaluation findings will be used to improve implementation, document outcomes, inform stakeholders, and support decisions after the grant period.", responses.slice(4)),
   ].filter(Boolean);
 }
@@ -1988,11 +2259,66 @@ function sectionParagraphs(section) {
 }
 
 function developedSectionParagraphs(section) {
+  if (state.aiDrafts[section.id]) return textToParagraphs(state.aiDrafts[section.id]);
   const context = proposalContext();
   const { freeDraft, responses } = guidedSourceForSection(section);
   const baseParagraphs = freeDraft || responses.length ? sectionParagraphs(section) : starterParagraphsForSection(section, context);
   const alignment = funderFitParagraph(section, context);
   return [...baseParagraphs, alignment].filter((paragraph) => paragraph && !/^This section has not been drafted yet\.$/.test(paragraph));
+}
+
+function aiSectionDraftPrompt(section) {
+  const context = proposalContext();
+  return `You are the AI proposal writer inside a grant-application platform. Draft the active proposal section in polished paragraph form. Use the applicant's notes as source material, but do not merely summarize them. Develop the section so it is persuasive, funder-aligned, evidence-informed, and ready for further editing.
+
+Active section: ${section.title}
+Project title: ${context.title}
+Funder: ${context.funder}
+Project idea: ${fields.ideaText.value.trim() || "Not provided"}
+Grant priorities: ${context.priorities.join("; ") || "Not detected"}
+Grant requirements: ${context.requirements.join("; ") || "Not detected"}
+Grant mission/purpose: ${context.grantMission.join("; ") || "Not detected"}
+Strategic grant moves: ${context.strategicMoves.join("; ") || "Not detected"}
+Literature findings: ${context.literatureFindings.join("; ") || "No attached literature analyzed yet"}
+Literature background: ${context.literatureBackground.join("; ") || "None"}
+Literature problem evidence: ${context.literatureProblem.join("; ") || "None"}
+Literature significance/forward-use evidence: ${context.literatureJustification.join("; ") || "None"}
+Literature methods evidence: ${context.literatureMethods.join("; ") || "None"}
+Literature evaluation evidence: ${context.literatureEvaluation.join("; ") || "None"}
+
+Applicant notes for this section:
+${draftCoreText(state.sections[section.id]) || "No section notes yet. Use the project idea, grant priorities, and analyzed literature to develop a strong starter draft."}
+
+Write 3-6 strong paragraphs. Do not include headings, bullet points, markdown, or generic advice. Do not invent citations or statistics. If literature details are incomplete, phrase evidence cautiously.`;
+}
+
+async function generateAiSectionDraft(sectionId) {
+  const section = sectionBlueprints.find((item) => item.id === sectionId);
+  if (!section) return;
+  const button = fields.sectionDraftAssistant?.querySelector("#generateAiDraftButton");
+  if (button) {
+    button.disabled = true;
+    button.textContent = "Drafting...";
+  }
+  try {
+    setAiStatus(`AI drafting ${section.title}`);
+    const draft = await callGemini(aiSectionDraftPrompt(section));
+    state.aiDrafts[section.id] = draft;
+    setAiStatus("AI draft ready");
+    renderDraftAssistant();
+    renderSections();
+  } catch (error) {
+    setAiStatus("AI draft failed");
+    if (fields.sectionDraftAssistant) {
+      fields.sectionDraftAssistant.innerHTML += `<div class="finding"><strong>AI draft failed</strong><p>${escapeHtml(error.message)}</p></div>`;
+    }
+  } finally {
+    const refreshedButton = fields.sectionDraftAssistant?.querySelector("#generateAiDraftButton");
+    if (refreshedButton) {
+      refreshedButton.disabled = false;
+      refreshedButton.textContent = "Draft with AI";
+    }
+  }
 }
 
 function renderDraftAssistant() {
@@ -2005,7 +2331,10 @@ function renderDraftAssistant() {
       <div>
         <strong>Generated section draft</strong>
       </div>
-      <button id="useGeneratedDraftButton" class="secondary-button" type="button">Use this draft</button>
+      <div class="draft-assistant-actions">
+        <button id="generateAiDraftButton" class="secondary-button" type="button">Draft with AI</button>
+        <button id="useGeneratedDraftButton" class="secondary-button" type="button">Use this draft</button>
+      </div>
     </div>
     <div class="generated-draft">
       ${paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}
@@ -2018,6 +2347,7 @@ function renderDraftAssistant() {
     renderSections();
     renderReadiness();
   });
+  fields.sectionDraftAssistant.querySelector("#generateAiDraftButton").addEventListener("click", () => generateAiSectionDraft(section.id));
 }
 
 function proposalIntroduction(context) {
@@ -2040,6 +2370,7 @@ function proposalBackground(context) {
       ...backgroundResponses,
       ...context.idea.slice(0, 1),
       ...context.grantMission.slice(0, 2),
+      ...context.literatureBackground.slice(0, 3),
     ]),
   ].filter(Boolean);
 }
@@ -2047,6 +2378,7 @@ function proposalBackground(context) {
 function proposalProblemStatement(context) {
   const problemResponses = [
     ...responseForPrompt("problem", [/gap between/i, /general problem/i, /specific problem/i, /research|data|scale|adversity/i, /existing gaps|failed approaches|insufficient/i]),
+    ...context.literatureProblem.slice(0, 4),
     sectionSourceText("problem"),
   ];
   const paragraphs = textToParagraphs(sectionSourceText("problem"));
@@ -2063,6 +2395,7 @@ function proposalJustification(context) {
     ...textToParagraphs(sectionSourceText("impact")),
     ...responseForPrompt("problem", [/why addressing|why investigating|matters|significance/i]),
     ...forwardUse,
+    ...context.literatureJustification.slice(0, 4),
   ];
   return [
     paragraphWithFrame("The justification for the study rests on the importance of addressing the problem, the consequences of inaction, and the value the work can create for stakeholders and the field.", significance.slice(0, 4)),
@@ -2078,6 +2411,7 @@ function proposalResearchQuestions(context) {
   ]);
   const objectiveItems = uniqueItems([
     ...responseForPrompt("objectives", [/specific aims|objectives/i, /measurable|target/i]),
+    ...context.literatureQuestions,
     ...textToParagraphs(sectionSourceText("objectives")),
   ]).slice(0, 4);
   const generalQuestion = problemFocus
@@ -2096,6 +2430,7 @@ function proposalResearchQuestions(context) {
 function proposalObjectives(context) {
   const objectiveItems = uniqueItems([
     ...responseForPrompt("objectives", [/specific aims|objectives/i, /measurable|target/i, /success/i]),
+    ...context.literatureObjectives,
     ...textToParagraphs(sectionSourceText("objectives")),
   ]).slice(0, 5);
   const generalObjective = context.title
@@ -2434,6 +2769,14 @@ document.querySelector("#insertPromptButton").addEventListener("click", insertGu
 document.querySelector("#runReviewButton").addEventListener("click", runReview);
 document.querySelector("#exportButton").addEventListener("click", exportBrief);
 fields.downloadProposalButton.addEventListener("click", downloadProposalDraft);
+fields.saveGeminiKeyButton.addEventListener("click", saveGeminiSettings);
+fields.analyzeLiteratureButton.addEventListener("click", analyzeLiteratureAttachments);
+fields.addLiteratureButton.addEventListener("click", () => fields.literatureInput.click());
+fields.literatureInput.addEventListener("change", () => {
+  const files = [...(fields.literatureInput.files || [])];
+  queueLiteratureFiles(files);
+  fields.literatureInput.value = "";
+});
 fields.saveProjectButton.addEventListener("click", saveCurrentProject);
 fields.newProjectButton.addEventListener("click", startNewProject);
 fields.projectSelect.addEventListener("change", (event) => {
@@ -2486,4 +2829,6 @@ renderSections();
 renderActiveSection();
 renderRequirements();
 renderProjectSelect();
+loadGeminiSettings();
+renderLiterature();
 renderReadiness();

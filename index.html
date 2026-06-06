@@ -74,6 +74,21 @@
             <button id="exportButton" class="secondary-button" type="button">Export brief</button>
             <span id="projectStatus" class="project-status">Not saved yet</span>
           </div>
+          <div class="ai-actions">
+            <label class="api-key-field">
+              Gemini API key
+              <input id="geminiApiKey" type="password" autocomplete="off" placeholder="Paste key" />
+            </label>
+            <label class="model-field">
+              AI model
+              <select id="geminiModel">
+                <option value="gemini-2.5-flash">Gemini 2.5 Flash</option>
+                <option value="gemini-2.0-flash">Gemini 2.0 Flash</option>
+              </select>
+            </label>
+            <button id="saveGeminiKeyButton" class="secondary-button" type="button">Save AI</button>
+            <span id="aiStatus" class="project-status">AI not connected</span>
+          </div>
         </header>
 
         <section class="panel is-visible" id="idea">
@@ -214,6 +229,16 @@
                 data-placeholder="Write this section here. The review panel will check for completeness, quality, and funder fit."
               ></div>
               <div id="problemRubric" class="problem-rubric" aria-live="polite"></div>
+              <div class="upload-zone literature-zone">
+                <input id="literatureInput" type="file" accept=".txt,.md,.pdf,.docx" multiple />
+                <div>
+                  <strong>Literature attachments</strong>
+                  <p id="literatureStatus">No papers attached yet.</p>
+                </div>
+                <button id="addLiteratureButton" class="icon-button" type="button" aria-label="Add literature attachment">+</button>
+                <button id="analyzeLiteratureButton" class="secondary-button" type="button">Analyze literature</button>
+              </div>
+              <div id="literatureList" class="literature-list" aria-live="polite"></div>
               <section id="sectionDraftAssistant" class="draft-assistant" aria-live="polite"></section>
             </div>
           </div>

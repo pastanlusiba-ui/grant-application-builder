@@ -162,6 +162,7 @@ button {
 
 .topbar {
   margin-bottom: 24px;
+  flex-wrap: wrap;
 }
 
 .project-actions {
@@ -170,15 +171,26 @@ button {
   gap: 10px;
 }
 
+.ai-actions {
+  display: flex;
+  align-items: end;
+  gap: 10px;
+  width: 100%;
+}
+
 .project-name-field,
-.project-picker {
+.project-picker,
+.api-key-field,
+.model-field {
   min-width: 230px;
   gap: 5px;
   font-size: 0.78rem;
 }
 
 .project-name-field input,
-.project-picker select {
+.project-picker select,
+.api-key-field input,
+.model-field select {
   width: 100%;
   border: 1px solid var(--line);
   border-radius: 8px;
@@ -723,6 +735,11 @@ textarea {
   gap: 12px;
 }
 
+.draft-assistant-actions {
+  display: flex;
+  gap: 8px;
+}
+
 .draft-assistant-header strong {
   color: #087989;
 }
@@ -736,6 +753,44 @@ textarea {
   margin: 0;
   color: var(--ink);
   line-height: 1.6;
+}
+
+.literature-zone {
+  align-items: center;
+  grid-template-columns: 1fr 1.4fr auto auto;
+}
+
+.literature-zone button {
+  justify-self: end;
+}
+
+.literature-list {
+  display: grid;
+  gap: 10px;
+}
+
+.literature-card {
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-left: 4px solid var(--signal);
+  border-radius: 8px;
+  background: #fff;
+}
+
+.literature-card.is-pending {
+  border-left-color: var(--gold);
+  background: #fffaf0;
+}
+
+.literature-card p {
+  margin: 6px 0;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.literature-card ul {
+  margin: 8px 0 0;
+  padding-left: 20px;
 }
 
 .rubric-header {
@@ -895,6 +950,8 @@ dialog {
   .writer-header,
   .review-actions,
   .draft-assistant-header,
+  .draft-assistant-actions,
+  .ai-actions,
   .project-actions {
     align-items: stretch;
     flex-direction: column;
