@@ -829,8 +829,8 @@ function getGeminiModel() {
 }
 
 function apiBaseUrl() {
-  if (location.protocol === "file:") return "http://127.0.0.1:8791";
-  return "";
+  const isBackendOrigin = ["127.0.0.1", "localhost"].includes(location.hostname) && location.port === "8791";
+  return isBackendOrigin ? "" : "http://127.0.0.1:8791";
 }
 
 function saveGeminiModel() {

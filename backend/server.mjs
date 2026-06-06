@@ -147,6 +147,14 @@ const server = createServer(async (req, res) => {
     return;
   }
 
+  if (req.method === "GET" && req.url === "/api/gemini/generate") {
+    sendJson(res, 200, {
+      message: "Gemini generation endpoint is ready. The app sends POST requests here; open /index.html to use the platform.",
+      ready: Boolean(process.env.GEMINI_API_KEY),
+    });
+    return;
+  }
+
   if (req.method === "POST" && req.url === "/api/gemini/generate") {
     try {
       await handleGeminiGenerate(req, res);
