@@ -1831,6 +1831,27 @@ function guidedSourceForSection(section) {
   return { freeDraft: "", responses: coreParagraphs };
 }
 
+function guidedPromptResponses(sectionId) {
+  const guidedDraft = parseGuidedDraft(state.sections[sectionId] || "");
+  return guidedDraft ? guidedDraft.prompts.filter((item) => wordCount(item.response) > 0) : [];
+}
+
+function sectionSourceText(sectionId) {
+  const section = sectionBlueprints.find((item) => item.id === sectionId);
+  return section ? draftCoreText(state.sections[section.id]) : "";
+}
+
+function responseForPrompt(sectionId, patterns) {
+  const matches = guidedPromptResponses(sectionId)
+    .filter((item) => patterns.some((pattern) => pattern.test(item.prompt)))
+    .map((item) => item.response);
+  return matches.length ? matches : [];
+}
+
+function firstMeaningful(items, fallback = "") {
+  return uniqueItems(items).find((item) => wordCount(item) > 3) || fallback;
+}
+
 function synthesizeProblemStatement(responses, freeDraft) {
   return [
     paragraphWithFrame("The proposed work responds to a clearly defined problem that requires focused attention.", [freeDraft, ...responses.slice(0, 3)]),
@@ -1982,7 +2003,7 @@ function renderDraftAssistant() {
   fields.sectionDraftAssistant.innerHTML = `
     <div class="draft-assistant-header">
       <div>
-        <strong>Generated proposal draft</strong>
+        <strong>Generated section draft</strong>
       </div>
       <button id="useGeneratedDraftButton" class="secondary-button" type="button">Use this draft</button>
     </div>
@@ -1999,29 +2020,130 @@ function renderDraftAssistant() {
   });
 }
 
+function proposalIntroduction(context) {
+  const titleFrame = context.title ? `This proposal, ${context.title},` : "This proposal";
+  const priorityFrame = listPhrase(context.priorities);
+  const missionFrame = listPhrase(context.grantMission);
+  return [
+    paragraphWithFrame(`${titleFrame} presents a focused and funder-aligned project for ${context.funder}.`, [
+      ...context.idea.slice(0, 2),
+      priorityFrame ? `The work is aligned with priority areas including ${priorityFrame}.` : "",
+      missionFrame ? `It responds to the grant purpose by addressing ${missionFrame}.` : "",
+    ]),
+  ].filter(Boolean);
+}
+
+function proposalBackground(context) {
+  const backgroundResponses = responseForPrompt("problem", [/background|orient/i, /who is affected|where and when|recurring|localized|systemic|widespread/i]);
+  return [
+    paragraphWithFrame("The background to this proposal establishes the setting, affected population, and conditions that make the work necessary.", [
+      ...backgroundResponses,
+      ...context.idea.slice(0, 1),
+      ...context.grantMission.slice(0, 2),
+    ]),
+  ].filter(Boolean);
+}
+
+function proposalProblemStatement(context) {
+  const problemResponses = [
+    ...responseForPrompt("problem", [/gap between/i, /general problem/i, /specific problem/i, /research|data|scale|adversity/i, /existing gaps|failed approaches|insufficient/i]),
+    sectionSourceText("problem"),
+  ];
+  const paragraphs = textToParagraphs(sectionSourceText("problem"));
+  return paragraphs.length
+    ? synthesizeProblemStatement(paragraphs, "")
+    : [
+        paragraphWithFrame("The problem addressed by this proposal is defined by a gap between current conditions and the outcomes that should be achieved.", problemResponses),
+      ].filter(Boolean);
+}
+
+function proposalJustification(context) {
+  const forwardUse = responseForPrompt("problem", [/forward use/i, /inform policy|practice|systems|future research|action/i]);
+  const significance = [
+    ...textToParagraphs(sectionSourceText("impact")),
+    ...responseForPrompt("problem", [/why addressing|why investigating|matters|significance/i]),
+    ...forwardUse,
+  ];
+  return [
+    paragraphWithFrame("The justification for the study rests on the importance of addressing the problem, the consequences of inaction, and the value the work can create for stakeholders and the field.", significance.slice(0, 4)),
+    paragraphWithFrame("The forward use of the work strengthens its significance because the findings, tools, evidence, or learning can inform future decisions, policy, practice, systems improvement, or additional research.", forwardUse.length ? forwardUse : significance.slice(4)),
+  ].filter(Boolean);
+}
+
+function proposalResearchQuestions(context) {
+  const problemFocus = firstMeaningful([
+    ...responseForPrompt("problem", [/specific problem/i, /focused problem/i]),
+    sectionSourceText("problem"),
+    context.title,
+  ]);
+  const objectiveItems = uniqueItems([
+    ...responseForPrompt("objectives", [/specific aims|objectives/i, /measurable|target/i]),
+    ...textToParagraphs(sectionSourceText("objectives")),
+  ]).slice(0, 4);
+  const generalQuestion = problemFocus
+    ? `General research question: How can ${context.title} address the identified problem and generate meaningful outcomes for the intended beneficiaries?`
+    : `General research question: What approach will most effectively address the problem targeted by this proposal?`;
+  const specificQuestions = objectiveItems.length
+    ? objectiveItems.map((item, index) => `Specific research question ${index + 1}: To what extent can the project ${item.replace(/[.!?]$/, "").toLowerCase()}?`)
+    : [
+        "Specific research question 1: What factors explain the persistence of the problem in the target context?",
+        "Specific research question 2: What intervention or implementation approach is most feasible and appropriate for the affected population?",
+        "Specific research question 3: What outcomes and learning can be generated during the grant period?",
+      ];
+  return [generalQuestion, ...specificQuestions];
+}
+
+function proposalObjectives(context) {
+  const objectiveItems = uniqueItems([
+    ...responseForPrompt("objectives", [/specific aims|objectives/i, /measurable|target/i, /success/i]),
+    ...textToParagraphs(sectionSourceText("objectives")),
+  ]).slice(0, 5);
+  const generalObjective = context.title
+    ? `General objective: To develop, implement, and assess ${context.title} in a way that responds to the identified problem and aligns with ${context.funder}'s priorities.`
+    : `General objective: To develop, implement, and assess the proposed project in response to the identified problem and funder priorities.`;
+  const specificObjectives = objectiveItems.length
+    ? objectiveItems.map((item, index) => `Specific objective ${index + 1}: ${sentenceFromText(item).replace(/^\w/, (letter) => letter.toUpperCase())}`)
+    : [
+        "Specific objective 1: To define the target problem, affected population, and implementation context with sufficient evidence.",
+        "Specific objective 2: To implement a feasible intervention or workplan that responds directly to the identified gap.",
+        "Specific objective 3: To measure outputs, outcomes, learning, and funder-relevant impact during the grant period.",
+      ];
+  return [generalObjective, ...specificObjectives];
+}
+
+function proposalDocumentSections() {
+  const context = proposalContext();
+  const coreSections = [
+    { title: "Introduction", paragraphs: proposalIntroduction(context) },
+    { title: "Background", paragraphs: proposalBackground(context) },
+    { title: "Problem statement", paragraphs: proposalProblemStatement(context) },
+    { title: "Justification/Significance of study", paragraphs: proposalJustification(context) },
+    { title: "Research questions", paragraphs: proposalResearchQuestions(context) },
+    { title: "Objectives", paragraphs: proposalObjectives(context) },
+  ];
+  const usedSectionIds = new Set(["problem", "objectives"]);
+  const remainingSections = sectionBlueprints
+    .filter((section) => !usedSectionIds.has(section.id))
+    .map((section) => ({
+      title: section.title,
+      paragraphs: developedSectionParagraphs(section),
+    }));
+
+  return [...coreSections, ...remainingSections].map((section) => ({
+    ...section,
+    paragraphs: section.paragraphs.length ? section.paragraphs : ["This section needs more source material before the platform can develop it fully."],
+  }));
+}
+
 function composedProposalDraft() {
   saveActiveDraft();
   const title = fields.projectTitle.value.trim() || currentProjectName();
-  const overview = textToParagraphs(fields.ideaText.value);
-  const projectOverview = overview.length
-    ? [
-        paragraphWithFrame("This proposal presents a focused project concept for funder consideration.", overview.slice(0, 2)),
-        paragraphWithFrame("The work is positioned around the problem, proposed response, intended beneficiaries, and expected contribution described by the applicant.", overview.slice(2)),
-      ].filter(Boolean)
-    : [];
-  const sections = [
-    ...(projectOverview.length ? [{ title: "Project overview", paragraphs: projectOverview }] : []),
-    ...sectionBlueprints.map((section) => ({
-      title: section.title,
-      paragraphs: developedSectionParagraphs(section),
-    })),
-  ];
 
   return {
     title,
     funder: fields.funderName.value.trim(),
     projectName: currentProjectName(),
-    sections,
+    sections: proposalDocumentSections(),
   };
 }
 
