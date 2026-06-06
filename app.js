@@ -487,9 +487,8 @@ const fields = {
   literatureStatus: document.querySelector("#literatureStatus"),
   literatureList: document.querySelector("#literatureList"),
   analyzeLiteratureButton: document.querySelector("#analyzeLiteratureButton"),
-  geminiApiKey: document.querySelector("#geminiApiKey"),
   geminiModel: document.querySelector("#geminiModel"),
-  saveGeminiKeyButton: document.querySelector("#saveGeminiKeyButton"),
+  checkAiBackendButton: document.querySelector("#checkAiBackendButton"),
   aiStatus: document.querySelector("#aiStatus"),
   reviewFindings: document.querySelector("#reviewFindings"),
   downloadProposalButton: document.querySelector("#downloadProposalButton"),
@@ -500,7 +499,6 @@ const fields = {
 };
 
 const projectStorageKey = "grantcraft.projects.v1";
-const geminiApiKeyStorageKey = "grantcraft.geminiApiKey.v1";
 const geminiModelStorageKey = "grantcraft.geminiModel.v1";
 
 function switchPanel(panelId) {
@@ -761,10 +759,10 @@ function normalizeLines(text) {
     .filter(Boolean);
 }
 
-function uniqueItems(items, limit = 8) {
+function uniqueItems(items, limit = Infinity) {
   const seen = new Set();
   return items
-    .map((item) => item.replace(/\s+/g, " ").trim())
+    .map((item) => String(item || "").replace(/\s+/g, " ").trim())
     .filter((item) => {
       const key = item.toLowerCase();
       if (!item || seen.has(key)) return false;
@@ -826,27 +824,36 @@ function setAiStatus(message) {
   if (fields.aiStatus) fields.aiStatus.textContent = message;
 }
 
-function getGeminiApiKey() {
-  return fields.geminiApiKey?.value.trim() || localStorage.getItem(geminiApiKeyStorageKey) || "";
-}
-
 function getGeminiModel() {
   return fields.geminiModel?.value || localStorage.getItem(geminiModelStorageKey) || "gemini-2.5-flash";
 }
 
-function saveGeminiSettings() {
-  const apiKey = fields.geminiApiKey.value.trim();
-  if (apiKey) localStorage.setItem(geminiApiKeyStorageKey, apiKey);
+function apiBaseUrl() {
+  if (location.protocol === "file:") return "http://127.0.0.1:8791";
+  return "";
+}
+
+function saveGeminiModel() {
   localStorage.setItem(geminiModelStorageKey, fields.geminiModel.value);
-  setAiStatus(apiKey ? "AI connected" : "AI key needed");
 }
 
 function loadGeminiSettings() {
-  const savedKey = localStorage.getItem(geminiApiKeyStorageKey) || "";
   const savedModel = localStorage.getItem(geminiModelStorageKey) || "gemini-2.5-flash";
-  fields.geminiApiKey.value = savedKey;
   fields.geminiModel.value = savedModel;
-  setAiStatus(savedKey ? "AI connected" : "AI not connected");
+  setAiStatus("Checking AI backend...");
+  checkAiBackend();
+}
+
+async function checkAiBackend() {
+  saveGeminiModel();
+  try {
+    const response = await fetch(`${apiBaseUrl()}/api/ai/status`);
+    if (!response.ok) throw new Error("AI backend unavailable");
+    const status = await response.json();
+    setAiStatus(status.ready ? "AI backend ready" : "Backend needs Gemini key");
+  } catch {
+    setAiStatus("AI backend offline");
+  }
 }
 
 function extractJsonFromText(text) {
@@ -862,29 +869,26 @@ function extractJsonFromText(text) {
 }
 
 async function callGemini(prompt, { expectJson = false } = {}) {
-  const apiKey = getGeminiApiKey();
-  if (!apiKey) throw new Error("Add and save your Gemini API key before using AI drafting.");
-
-  const model = getGeminiModel();
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+  saveGeminiModel();
+  const response = await fetch(`${apiBaseUrl()}/api/gemini/generate`, {
     method: "POST",
     headers: {
       "Content-Type": "application/json",
-      "x-goog-api-key": apiKey,
     },
     body: JSON.stringify({
-      contents: [{ parts: [{ text: prompt }] }],
-      generationConfig: expectJson ? { responseMimeType: "application/json" } : undefined,
+      model: getGeminiModel(),
+      prompt,
+      expectJson,
     }),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`Gemini request failed: ${errorText.slice(0, 240)}`);
+    throw new Error(`AI backend request failed: ${errorText.slice(0, 240)}`);
   }
 
   const result = await response.json();
-  const text = result.candidates?.[0]?.content?.parts?.map((part) => part.text || "").join("\n").trim();
+  const text = result.text?.trim();
   if (!text) throw new Error("Gemini did not return usable text.");
   return expectJson ? extractJsonFromText(text) : text;
 }
@@ -2024,19 +2028,6 @@ function textToParagraphs(text) {
     .filter(Boolean);
 }
 
-function uniqueItems(items) {
-  const seen = new Set();
-  return items
-    .map((item) => cleanDraftParagraph(item))
-    .filter(Boolean)
-    .filter((item) => {
-      const key = item.toLowerCase();
-      if (seen.has(key)) return false;
-      seen.add(key);
-      return true;
-    });
-}
-
 function listPhrase(items, limit = 3) {
   const values = uniqueItems(items).slice(0, limit);
   if (!values.length) return "";
@@ -2769,7 +2760,11 @@ document.querySelector("#insertPromptButton").addEventListener("click", insertGu
 document.querySelector("#runReviewButton").addEventListener("click", runReview);
 document.querySelector("#exportButton").addEventListener("click", exportBrief);
 fields.downloadProposalButton.addEventListener("click", downloadProposalDraft);
-fields.saveGeminiKeyButton.addEventListener("click", saveGeminiSettings);
+fields.checkAiBackendButton.addEventListener("click", checkAiBackend);
+fields.geminiModel.addEventListener("change", () => {
+  saveGeminiModel();
+  checkAiBackend();
+});
 fields.analyzeLiteratureButton.addEventListener("click", analyzeLiteratureAttachments);
 fields.addLiteratureButton.addEventListener("click", () => fields.literatureInput.click());
 fields.literatureInput.addEventListener("change", () => {

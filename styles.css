@@ -180,7 +180,6 @@ button {
 
 .project-name-field,
 .project-picker,
-.api-key-field,
 .model-field {
   min-width: 230px;
   gap: 5px;
@@ -189,7 +188,6 @@ button {
 
 .project-name-field input,
 .project-picker select,
-.api-key-field input,
 .model-field select {
   width: 100%;
   border: 1px solid var(--line);
