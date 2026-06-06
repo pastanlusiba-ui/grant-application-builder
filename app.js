@@ -478,6 +478,7 @@ const fields = {
   sectionGuidance: document.querySelector("#sectionGuidance"),
   sectionDraft: document.querySelector("#sectionDraft"),
   problemRubric: document.querySelector("#problemRubric"),
+  sectionDraftAssistant: document.querySelector("#sectionDraftAssistant"),
   reviewFindings: document.querySelector("#reviewFindings"),
   downloadProposalButton: document.querySelector("#downloadProposalButton"),
   projectSelect: document.querySelector("#projectSelect"),
@@ -1521,6 +1522,7 @@ function renderActiveSection() {
   fields.sectionGuidance.hidden = true;
   fields.sectionGuidance.innerHTML = "";
   renderSectionRubric();
+  renderDraftAssistant();
 }
 
 function insertGuidePrompts() {
@@ -1697,6 +1699,7 @@ function renderReadiness() {
       : score < 70
         ? "Keep checking requirements and drafting sections with evidence."
         : "You are moving into polish: tighten claims, metrics, and funder fit.";
+  renderDraftAssistant();
 }
 
 function requirementRatio() {
@@ -1758,6 +1761,44 @@ function textToParagraphs(text) {
     .split(/\n{2,}/)
     .map(cleanDraftParagraph)
     .filter(Boolean);
+}
+
+function uniqueItems(items) {
+  const seen = new Set();
+  return items
+    .map((item) => cleanDraftParagraph(item))
+    .filter(Boolean)
+    .filter((item) => {
+      const key = item.toLowerCase();
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    });
+}
+
+function listPhrase(items, limit = 3) {
+  const values = uniqueItems(items).slice(0, limit);
+  if (!values.length) return "";
+  if (values.length === 1) return values[0];
+  if (values.length === 2) return `${values[0]} and ${values[1]}`;
+  return `${values.slice(0, -1).join(", ")}, and ${values.at(-1)}`;
+}
+
+function proposalContext() {
+  const analysis = state.grantAnalysis || {};
+  const priorities = [
+    ...state.priorities.map((priority) => priority.label),
+    ...((analysis.themes || []).map((theme) => theme.label)),
+  ];
+  return {
+    title: fields.projectTitle.value.trim() || currentProjectName(),
+    funder: fields.funderName.value.trim() || analysis.funderName || "the funder",
+    idea: textToParagraphs(fields.ideaText.value),
+    priorities: uniqueItems(priorities),
+    requirements: uniqueItems(state.requirements.map((requirement) => requirement.text)),
+    grantMission: uniqueItems(analysis.mission || []),
+    strategicMoves: uniqueItems(analysis.strategicMoves || []),
+  };
 }
 
 function sentenceFromText(text) {
@@ -1865,6 +1906,57 @@ const proposalSectionSynthesizers = {
   sustainability: synthesizeSustainability,
 };
 
+function starterParagraphsForSection(section, context) {
+  const ideaLead = context.idea[0] || "";
+  const priorityPhrase = listPhrase(context.priorities);
+  const funderFrame = priorityPhrase ? `${context.funder} appears to value ${priorityPhrase}.` : "";
+  const starters = {
+    problem: [
+      paragraphWithFrame("The proposal is grounded in a compelling problem narrative shaped by the project concept and the funder's priorities.", [ideaLead, funderFrame]),
+    ],
+    solution: [
+      paragraphWithFrame("The proposed response offers a practical and funder-aligned way to address the need described in the concept.", [ideaLead, funderFrame]),
+    ],
+    objectives: [
+      paragraphWithFrame("The objectives convert the project concept into measurable commitments that reviewers can assess.", [ideaLead, funderFrame]),
+    ],
+    methods: [
+      paragraphWithFrame("The workplan shows how the concept will be delivered through a credible sequence of activities, responsibilities, and milestones.", [ideaLead, funderFrame]),
+    ],
+    impact: [
+      paragraphWithFrame("The impact case explains why the proposed work matters and how it advances the funder's priorities.", [ideaLead, funderFrame]),
+    ],
+    evaluation: [
+      paragraphWithFrame("The evaluation plan shows how the project will generate credible evidence of implementation quality, outcomes, and learning.", [ideaLead, funderFrame]),
+    ],
+    budget: [
+      paragraphWithFrame("The budget justification connects requested resources to the project concept, delivery plan, evaluation needs, and funder rules.", [ideaLead, funderFrame]),
+    ],
+    sustainability: [
+      paragraphWithFrame("The sustainability section explains how the benefits, relationships, tools, evidence, or systems created by the project will continue after the grant.", [ideaLead, funderFrame]),
+    ],
+  };
+  return starters[section.id] || [];
+}
+
+function funderFitParagraph(section, context) {
+  const priorityPhrase = listPhrase(context.priorities);
+  const requirementPhrase = listPhrase(context.requirements);
+  const missionPhrase = listPhrase(context.grantMission);
+  const strategicPhrase = listPhrase(context.strategicMoves);
+  const alignmentParts = [
+    priorityPhrase ? `The proposal is aligned with ${context.funder}'s priorities, especially ${priorityPhrase}.` : "",
+    missionPhrase ? `It responds to the grant purpose by addressing ${missionPhrase}.` : "",
+    requirementPhrase ? `The design is attentive to visible requirements such as ${requirementPhrase}.` : "",
+    strategicPhrase ? `The section strengthens competitiveness by emphasizing ${strategicPhrase}.` : "",
+  ].filter(Boolean);
+
+  return paragraphWithFrame(
+    `This ${section.title.toLowerCase()} advances the proposal beyond description by showing fit, feasibility, evidence, and value to ${context.funder}.`,
+    alignmentParts,
+  );
+}
+
 function sectionParagraphs(section) {
   const { freeDraft, responses } = guidedSourceForSection(section);
   if (!freeDraft && !responses.length) return ["This section has not been drafted yet."];
@@ -1872,6 +1964,39 @@ function sectionParagraphs(section) {
   const synthesizer = proposalSectionSynthesizers[section.id];
   const paragraphs = synthesizer ? synthesizer(responses, freeDraft) : textToParagraphs(draftCoreText(state.sections[section.id]));
   return paragraphs.length ? paragraphs : ["This section needs more source material before the platform can draft it into proposal prose."];
+}
+
+function developedSectionParagraphs(section) {
+  const context = proposalContext();
+  const { freeDraft, responses } = guidedSourceForSection(section);
+  const baseParagraphs = freeDraft || responses.length ? sectionParagraphs(section) : starterParagraphsForSection(section, context);
+  const alignment = funderFitParagraph(section, context);
+  return [...baseParagraphs, alignment].filter((paragraph) => paragraph && !/^This section has not been drafted yet\.$/.test(paragraph));
+}
+
+function renderDraftAssistant() {
+  if (!fields.sectionDraftAssistant) return;
+  const section = sectionBlueprints.find((item) => item.id === state.activeSection);
+  if (!section) return;
+  const paragraphs = developedSectionParagraphs(section);
+  fields.sectionDraftAssistant.innerHTML = `
+    <div class="draft-assistant-header">
+      <div>
+        <strong>Generated proposal draft</strong>
+      </div>
+      <button id="useGeneratedDraftButton" class="secondary-button" type="button">Use this draft</button>
+    </div>
+    <div class="generated-draft">
+      ${paragraphs.map((paragraph) => `<p>${escapeHtml(paragraph)}</p>`).join("")}
+    </div>
+  `;
+  fields.sectionDraftAssistant.querySelector("#useGeneratedDraftButton").addEventListener("click", () => {
+    state.sections[section.id] = paragraphs.join("\n\n");
+    renderSectionEditor(state.sections[section.id]);
+    renderSectionRubric();
+    renderSections();
+    renderReadiness();
+  });
 }
 
 function composedProposalDraft() {
@@ -1888,7 +2013,7 @@ function composedProposalDraft() {
     ...(projectOverview.length ? [{ title: "Project overview", paragraphs: projectOverview }] : []),
     ...sectionBlueprints.map((section) => ({
       title: section.title,
-      paragraphs: sectionParagraphs(section),
+      paragraphs: developedSectionParagraphs(section),
     })),
   ];
 
